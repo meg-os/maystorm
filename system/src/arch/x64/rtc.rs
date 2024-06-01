@@ -89,8 +89,8 @@ impl Rtc {
         let is_12h = (reg_b & 2) == 0;
         let is_bcd = (reg_b & 4) == 0;
         let sec = Self::fix_value(time.0, is_bcd) as u64;
-        let min = Self::fix_hour(time.1, is_bcd, is_12h) as u64;
-        let hour = Self::fix_value(time.2, is_bcd) as u64;
+        let min = Self::fix_value(time.1, is_bcd) as u64;
+        let hour = Self::fix_hour(time.2, is_bcd, is_12h) as u64;
         let day = Self::fix_value(time.3, is_bcd);
         let month = Self::fix_value(time.4, is_bcd);
         let year =
@@ -112,7 +112,7 @@ impl Rtc {
             Some(v) => Cmos::read_direct(v.get()),
             None => 0,
         };
-        (min, sec, hour, day, month, year, century)
+        (sec, min, hour, day, month, year, century)
     }
 
     #[inline]
@@ -139,7 +139,7 @@ impl Rtc {
         if is_12h && val == 12 {
             val = 0;
         }
-        if pm {
+        if is_12h && pm {
             val += 12;
         }
         val
@@ -161,6 +161,9 @@ enum Cmos {
     Year,
     StatusA,
     StatusB,
+    StatusC,
+    StatusD,
+    Diagnostic,
 }
 
 #[allow(dead_code)]
