@@ -386,7 +386,7 @@ impl MemFreePair {
     }
 
     #[inline]
-    fn split(data: u64) -> (PhysicalAddress, usize) {
+    fn _split(data: u64) -> (PhysicalAddress, usize) {
         (
             PhysicalAddress::new(data & 0xFFFF_FFFF),
             (data >> 32) as usize,
@@ -395,20 +395,20 @@ impl MemFreePair {
 
     #[inline]
     pub fn base(&self) -> PhysicalAddress {
-        Self::split(self.raw()).0 * Self::PAGE_SIZE
+        Self::_split(self.raw()).0 * Self::PAGE_SIZE
     }
 
     #[inline]
     pub fn size(&self) -> usize {
-        Self::split(self.raw()).1 * Self::PAGE_SIZE
+        Self::_split(self.raw()).1 * Self::PAGE_SIZE
     }
 
     #[inline]
     pub fn try_merge(&self, other: Self) -> Result<(), ()> {
         let p = self.inner();
         p.fetch_update(Ordering::SeqCst, Ordering::Relaxed, |data| {
-            let (base0, size0) = Self::split(data);
-            let (base1, size1) = Self::split(other.raw());
+            let (base0, size0) = Self::_split(data);
+            let (base1, size1) = Self::_split(other.raw());
             let end0 = base0 + size0;
             let end1 = base1 + size1;
             if end0 == base1 {
@@ -428,7 +428,7 @@ impl MemFreePair {
         let size = (size + Self::PAGE_SIZE - 1) / Self::PAGE_SIZE;
         let p = self.inner();
         p.fetch_update(Ordering::SeqCst, Ordering::Relaxed, |data| {
-            let (base, limit) = Self::split(data);
+            let (base, limit) = Self::_split(data);
             if limit < size {
                 return None;
             }
@@ -436,7 +436,7 @@ impl MemFreePair {
             let new_data = ((base + size).as_u64()) | ((new_size as u64) << 32);
             Some(new_data)
         })
-        .map(|data| Self::split(data).0 * Self::PAGE_SIZE)
+        .map(|data| Self::_split(data).0 * Self::PAGE_SIZE)
         .map_err(|_| ())
     }
 }

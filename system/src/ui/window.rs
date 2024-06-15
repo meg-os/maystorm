@@ -33,10 +33,10 @@ const WINDOW_CORNER_RADIUS: u32 = 8;
 const WINDOW_THICK_BORDER_WIDTH_V: u32 = WINDOW_CORNER_RADIUS / 2;
 const WINDOW_THICK_BORDER_WIDTH_H: u32 = WINDOW_CORNER_RADIUS / 2;
 const WINDOW_TITLE_HEIGHT: u32 = 28;
-const WINDOW_TITLE_BORDER: u32 = 0;
+const WINDOW_TITLE_BORDER: u32 = 1;
 const WINDOW_SHADOW_PADDING: u32 = 16;
 const SHADOW_RADIUS: u32 = 12;
-const SHADOW_OFFSET: Movement = Movement::new(2, 2);
+const SHADOW_OFFSET: Point = Point::new(2, 2);
 const SHADOW_LEVEL: usize = 96;
 
 const CORNER_MASK: [u8; WINDOW_CORNER_RADIUS as usize] = [6, 4, 3, 2, 1, 1, 0, 0];
@@ -266,7 +266,7 @@ impl WindowManager<'_> {
     fn window_thread(_: usize) {
         let shared = WindowManager::shared();
 
-        let mut captured_offset = Movement::default();
+        let mut captured_offset = Point::default();
 
         loop {
             shared.sem_event.wait();
@@ -1358,7 +1358,7 @@ impl RawWindow {
 
     fn test_frame(&self, position: Point, frame: Rect) -> bool {
         let mut frame = frame;
-        frame.origin += Movement::from(self.frame.origin());
+        frame.origin += Point::from(self.frame.origin());
         frame.contains(position)
     }
 
@@ -1379,7 +1379,7 @@ impl RawWindow {
                 .iter()
                 .position(|v| *v == self.handle)
                 .unwrap_or(0);
-            let screen_rect = rect + Movement::from(self.frame.origin());
+            let screen_rect = rect + Point::from(self.frame.origin());
 
             let mut is_direct = true;
             for handle in window_orders[first_index..].iter() {
@@ -1399,7 +1399,7 @@ impl RawWindow {
             if let Some(screen) = System::main_screen() {
                 screen.blt(
                     self.bitmap32().as_const(),
-                    offset + Movement::from(coords.left_top()),
+                    offset + coords.left_top(),
                     coords.into(),
                 );
             }
@@ -1410,11 +1410,11 @@ impl RawWindow {
             let frame_origin = self.frame.origin();
             let offset = self.shadow_frame().origin();
             let rect = Rect::from(coords.trimmed(inner_coords)) + (frame_origin - offset);
-            self.draw_outer_to_screen(Movement::from(offset), rect, is_opaque);
+            self.draw_outer_to_screen(offset, rect, is_opaque);
         }
     }
 
-    fn draw_outer_to_screen(&self, offset: Movement, rect: Rect, is_opaque: bool) {
+    fn draw_outer_to_screen(&self, offset: Point, rect: Rect, is_opaque: bool) {
         let screen_rect = rect + offset;
         let back_buffer = unsafe { &mut *self.back_buffer.get() };
         let back_buffer = back_buffer.as_mut();
@@ -1428,7 +1428,7 @@ impl RawWindow {
     fn draw_into(
         &self,
         target_bitmap: &mut BitmapRefMut32,
-        offset: Movement,
+        offset: Point,
         frame1: Rect,
         is_opaque: bool,
     ) -> bool {
@@ -1598,7 +1598,7 @@ impl RawWindow {
                         .font(&shared.resources.title_font)
                         .color(self.title_foreground())
                         .center()
-                        .shadow(self.title_shadow_color(), Movement::new(1, 1))
+                        .shadow(self.title_shadow_color(), Point::new(1, 1))
                         .text(self.title())
                         .draw_text(
                             bitmap,
@@ -1642,10 +1642,10 @@ impl RawWindow {
                         let y = i as i32;
                         let w = *w as i32;
                         for origin in [
-                            lt + Movement::new(0, y),
-                            rt + Movement::new(-w, y),
-                            lb + Movement::new(0, -y - 1),
-                            rb + Movement::new(-w, -y - 1),
+                            lt + Point::new(0, y),
+                            rt + Point::new(-w, y),
+                            lb + Point::new(0, -y - 1),
+                            rb + Point::new(-w, -y - 1),
                         ] {
                             bitmap.draw_hline(origin, w as u32, Color::TRANSPARENT);
                         }
@@ -2392,7 +2392,7 @@ impl WindowHandle {
     }
 
     #[inline]
-    pub fn move_by(&self, movement: Movement) {
+    pub fn move_by(&self, movement: Point) {
         self.set_frame(self.frame() + movement);
     }
 
@@ -2459,7 +2459,7 @@ impl WindowHandle {
 
     #[inline]
     pub fn invalidate_rect(&self, rect: Rect) {
-        self.update(|window| {
+        let _ = self.update_opt(|window| {
             let mut frame = rect;
             frame.origin.x += window.content_insets.left;
             frame.origin.y += window.content_insets.top;
@@ -2492,7 +2492,10 @@ impl WindowHandle {
     where
         F: FnOnce(&mut BitmapRefMut) -> (),
     {
-        self.as_ref().draw_in_rect(rect, f)
+        match self.get() {
+            Some(v) => v.draw_in_rect(rect, f),
+            None => Err(WindowDrawingError::NoWindow),
+        }
     }
 
     /// Draws the contents of the window on the screen as a bitmap.
@@ -2500,8 +2503,8 @@ impl WindowHandle {
         let window = self.as_ref();
         window.draw_into(
             target_bitmap,
-            Movement::default(),
-            rect + Movement::from(window.frame.origin()),
+            Point::default(),
+            rect + Point::from(window.frame.origin()),
             false,
         );
     }
@@ -2644,6 +2647,7 @@ impl Future for WindowMessageConsumer {
 #[derive(Debug, Copy, Clone)]
 pub enum WindowDrawingError {
     NoBitmap,
+    NoWindow,
     InconsistentCoordinates,
 }
 

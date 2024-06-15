@@ -888,7 +888,7 @@ impl HoeWindow {
                     match (left, right) {
                         (Some(left), Some(right)) => {
                             self.put_font_data(hoe, origin, left, color);
-                            self.put_font_data(hoe, origin + Movement::new(8, 0), right, color);
+                            self.put_font_data(hoe, origin + Point::new(8, 0), right, color);
                         }
                         _ => {
                             let x0 = (origin.x + 1) as u32;

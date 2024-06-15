@@ -9,7 +9,7 @@ extern crate alloc;
 use bootprot::*;
 use core::fmt::{self, Write};
 use core::num::NonZeroU8;
-use core::ptr::addr_of_mut;
+use core::ptr::{addr_of, addr_of_mut};
 use kernel::drivers::pci;
 use kernel::drivers::usb;
 use kernel::fs::*;
@@ -33,6 +33,7 @@ unsafe fn _start(info: &BootInfo) -> ! {
 static mut MAIN: Shell = Shell::new();
 
 pub struct Shell {
+    home: Option<String>,
     path_ext: Vec<String>,
 }
 
@@ -45,24 +46,31 @@ impl Shell {
     #[inline]
     const fn new() -> Self {
         Self {
+            home: None,
             path_ext: Vec::new(),
         }
     }
 
     #[inline]
-    fn shared<'a>() -> &'a mut Self {
+    unsafe fn shared_mut<'a>() -> &'a mut Self {
         unsafe { &mut *addr_of_mut!(MAIN) }
+    }
+
+    #[inline]
+    fn shared<'a>() -> &'a Self {
+        unsafe { &*addr_of!(MAIN) }
     }
 
     // Shell entry point
     fn start() {
-        let shared = Self::shared();
+        let shared = unsafe { Self::shared_mut() };
+        shared.home = Some("/boot".to_owned());
         for ext in RuntimeEnvironment::supported_extensions() {
             shared.path_ext.push(ext.to_string());
         }
 
         // Self::exec_cmd("ver");
-        Self::exec_cmd("cd boot");
+        Self::exec_cmd("cd");
 
         Scheduler::spawn_async(Self::repl_main());
         Scheduler::perform_tasks();
@@ -100,8 +108,12 @@ impl Shell {
                 let name = cmd.as_str();
                 let args = args.iter().map(|v| v.as_str()).collect::<Vec<&str>>();
                 match name {
-                    "clear" | "cls" | "reset" => System::stdout().reset().unwrap(),
-                    "exit" => println!("Feature not available"),
+                    "clear" | "cls" | "reset" => {
+                        System::stdout().reset().unwrap();
+                    }
+                    "exit" => {
+                        println!("Feature not available");
+                    }
                     "echo" => {
                         let stdout = System::stdout();
                         for (index, word) in args.iter().skip(1).enumerate() {
@@ -303,23 +315,23 @@ impl Shell {
     }
 
     const COMMAND_TABLE: [(&'static str, fn(&[&str]) -> (), &'static str); 17] = [
+        ("cat", Self::cmd_cat, "Show a file"),
         ("cd", Self::cmd_cd, ""),
-        ("mkdir", Self::cmd_mkdir, ""),
-        ("rm", Self::cmd_rm, ""),
-        ("mv", Self::cmd_mv, ""),
-        ("touch", Self::cmd_touch, ""),
-        ("pwd", Self::cmd_pwd, ""),
-        ("ls", Self::cmd_ls, "Show directory"),
-        ("cat", Self::cmd_cat, "Show file"),
         ("dir", Self::cmd_ls, ""),
-        ("type", Self::cmd_cat, ""),
-        ("stat", Self::cmd_stat, ""),
-        ("mount", Self::cmd_mount, ""),
-        ("ps", Self::cmd_ps, ""),
-        ("lspci", Self::cmd_lspci, "Show List of PCI Devices"),
-        ("lsusb", Self::cmd_lsusb, "Show List of USB Devices"),
-        ("sysctl", Self::cmd_sysctl, "System Control"),
         ("help", Self::cmd_help, ""),
+        ("ls", Self::cmd_ls, "Show list of directory"),
+        ("lspci", Self::cmd_lspci, "Show list of PCI Devices"),
+        ("lsusb", Self::cmd_lsusb, "Show list of USB Devices"),
+        ("mkdir", Self::cmd_mkdir, ""),
+        ("mount", Self::cmd_mount, ""),
+        ("mv", Self::cmd_mv, ""),
+        ("ps", Self::cmd_ps, ""),
+        ("pwd", Self::cmd_pwd, ""),
+        ("rm", Self::cmd_rm, ""),
+        ("stat", Self::cmd_stat, ""),
+        ("sysctl", Self::cmd_sysctl, "System Control"),
+        ("touch", Self::cmd_touch, ""),
+        ("type", Self::cmd_cat, ""),
     ];
 
     fn cmd_help(_: &[&str]) {
@@ -331,7 +343,8 @@ impl Shell {
     }
 
     fn cmd_cd(argv: &[&str]) {
-        let path = argv.get(1).unwrap_or(&"/");
+        let home = Self::shared().home.as_ref().unwrap().as_str();
+        let path = argv.get(1).unwrap_or(&home);
         match FileManager::chdir(path) {
             Ok(_) => (),
             Err(err) => {

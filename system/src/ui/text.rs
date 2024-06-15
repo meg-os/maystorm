@@ -53,7 +53,7 @@ impl AttributedString<'_> {
     }
 
     #[inline]
-    pub fn shadow_offset(&self) -> Movement {
+    pub fn shadow_offset(&self) -> Point {
         self.attributes.shadow_offset
     }
 
@@ -93,7 +93,7 @@ pub struct AttributeSet {
     align: TextAlignment,
     valign: VerticalAlignment,
     shadow_color: Color,
-    shadow_offset: Movement,
+    shadow_offset: Point,
 }
 
 impl AttributeSet {
@@ -106,7 +106,7 @@ impl AttributeSet {
             align: TextAlignment::Leading,
             valign: VerticalAlignment::Center,
             shadow_color: Color::TRANSPARENT,
-            shadow_offset: Movement::default(),
+            shadow_offset: Point::default(),
         }
     }
 
@@ -224,7 +224,7 @@ impl AttributeSet {
     }
 
     #[inline]
-    pub fn shadow(mut self, color: Color, offset: Movement) -> Self {
+    pub fn shadow(mut self, color: Color, offset: Point) -> Self {
         self.shadow_color = color;
         self.shadow_offset = offset;
         self
@@ -330,7 +330,7 @@ impl TextProcessing {
                 current_height += current_line.height;
                 vec.push(current_line);
                 current_line = LineStatus::empty();
-                if vec.len() >= max_lines || current_height >= size.height() {
+                if vec.len() >= max_lines || current_height > size.height() {
                     break;
                 }
                 current_line.new_line(index + 1, 0, font.line_height());
@@ -350,7 +350,7 @@ impl TextProcessing {
                     current_height += current_line.height;
                     vec.push(current_line);
                     current_line = LineStatus::empty();
-                    if vec.len() >= max_lines || current_height >= size.height() {
+                    if vec.len() >= max_lines || current_height > size.height() {
                         break;
                     }
                     current_line.new_line(index, current_width, font.line_height());
@@ -395,7 +395,7 @@ impl TextProcessing {
         align: TextAlignment,
         valign: VerticalAlignment,
         shadow_color: Color,
-        shadow_offset: Movement,
+        shadow_offset: Point,
     ) {
         let Ok(coords) = Coordinates::from_rect(rect) else {
             return;

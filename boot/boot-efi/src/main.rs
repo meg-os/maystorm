@@ -16,25 +16,23 @@ use lib_efi::*;
 use loader::*;
 use page::*;
 use uefi::data_types::Guid;
-use uefi::prelude::*;
 use uefi::proto::console::gop;
 use uefi::table::{
     boot::{MemoryType, OpenProtocolAttributes, OpenProtocolParams, SearchType},
     cfg::{ACPI2_GUID, SMBIOS_GUID},
 };
 use uefi::Identify;
+use uefi::{guid, prelude::*};
 
 //#define EFI_DTB_TABLE_GUID  {0xb1b621d5, 0xf19c, 0x41a5, {0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0}}
-const DTB_GUID: Guid = Guid::from_bytes([
-    0xb1, 0xb6, 0x21, 0xd5, 0xf1, 0x9c, 0x41, 0xa5, 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0,
-]);
+const DTB_GUID: Guid = guid!("b1b621d5-f19c-41a5-830b-d9152c69aae0");
 
 static KERNEL_PATH: &str = "/EFI/MEGOS/kernel.bin";
 static INITRD_PATH: &str = "/EFI/MEGOS/initrd.img";
 
 #[entry]
 fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
-    uefi_services::init(&mut st).unwrap();
+    uefi::helpers::init(&mut st).unwrap();
 
     let mut info = BootInfo {
         platform: PlatformType::UefiNative,
@@ -70,7 +68,6 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
     }
 
     // Init graphics
-    // let mut graphics_ok = false;
     if let Ok(handle_buffer) =
         bs.locate_handle_buffer(SearchType::ByProtocol(&gop::GraphicsOutput::GUID))
     {
@@ -104,18 +101,13 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
                 unsafe {
                     debug::Console::init(info.vram_base as usize, width, height, stride);
                 }
-                // graphics_ok = true;
             }
         }
     }
-    // if !graphics_ok && !info.flags.contains(BootFlags::HEADLESS) {
-    //     writeln!(st.stdout(), "Error: GOP Not Found").unwrap();
-    //     return Status::LOAD_ERROR;
-    // }
 
-    // println!("ACPI: {:012x}", info.acpi_rsdptr);
+    // println!("ACPI:   {:012x}", info.acpi_rsdptr);
     // println!("SMBIOS: {:012x}", info.smbios);
-    // println!("DTB: {:012x}", info.dtb);
+    // println!("DTB:    {:012x}", info.dtb);
     // todo!();
 
     // Load the KERNEL

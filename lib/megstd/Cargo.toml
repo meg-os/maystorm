@@ -17,5 +17,5 @@ window = []
 meggl = {path = "../meggl/"}
 uuid = {path = "../uuid/"}
 
-num-derive = {default-features = false}
-num-traits = {default-features = false}
+num-derive = { version="0.4.2",default-features = false }
+num-traits = { version="0.2.19",default-features = false }

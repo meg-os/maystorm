@@ -18,8 +18,8 @@ static mut SHARED_CPU: UnsafeCell<SharedCpu> = UnsafeCell::new(SharedCpu::new())
 
 pub const KERNEL_CSEL: Selector = Selector::new(1, RPL0);
 pub const KERNEL_DSEL: Selector = Selector::new(2, RPL0);
-pub const LEFACY_CSEL: Selector = Selector::new(3, RPL3);
-pub const LEFACY_DSEL: Selector = Selector::new(4, RPL3);
+pub const LEGACY_CSEL: Selector = Selector::new(3, RPL3);
+pub const LEGACY_DSEL: Selector = Selector::new(4, RPL3);
 pub const USER_CSEL: Selector = Selector::new(5, RPL3);
 pub const USER_DSEL: Selector = Selector::new(6, RPL3);
 pub const SYSTEM_TSS: Selector = Selector::new(8, RPL0);
@@ -239,13 +239,11 @@ impl Cpu {
 
     #[inline]
     pub const fn physical_id(&self) -> usize {
-        // TODO: pub
         self.apic_id().as_u32() as usize
     }
 
     #[inline]
     pub const fn processor_type(&self) -> ProcessorCoreType {
-        // TODO: pub
         self.core_type
     }
 
@@ -377,7 +375,7 @@ impl Cpu {
         // Prepare GDT for 32-bit user mode.
         let gdt = GlobalDescriptorTable::current();
         gdt.set_item(
-            LEFACY_CSEL,
+            LEGACY_CSEL,
             DescriptorEntry::code_segment(
                 Linear32(ctx.base_of_code),
                 Limit32(ctx.size_of_code - 1),
@@ -387,7 +385,7 @@ impl Cpu {
         )
         .unwrap();
         gdt.set_item(
-            LEFACY_DSEL,
+            LEGACY_DSEL,
             DescriptorEntry::data_segment(
                 Linear32(ctx.base_of_data),
                 Limit32(ctx.size_of_data - 1),
@@ -426,8 +424,8 @@ impl Cpu {
             xor edi, edi
             iretq
             ",
-            new_ss = in (reg) LEFACY_DSEL.as_usize(),
-            new_cs = in (reg) LEFACY_CSEL.as_usize(),
+            new_ss = in (reg) LEGACY_DSEL.as_usize(),
+            new_cs = in (reg) LEGACY_CSEL.as_usize(),
             new_sp = in (reg) ctx.stack_pointer as usize,
             new_ip = in (reg) ctx.start as usize,
             new_fl = in (reg) rflags.bits(),
@@ -565,15 +563,15 @@ impl CpuContextData {
             CTX_FPU = const Self::CTX_FPU,
             CTX_TSS_RSP0 = const Self::CTX_TSS_RSP0,
             OFFSET_TSS = const GlobalDescriptorTable::OFFSET_TSS,
-            TSS_OFF_RSP0 = const TaskStateSegment::OFFSET_RSP0,
+            TSS_OFF_RSP0 = const TaskStateSegment64::OFFSET_RSP0,
             CTX_DS = const Self::CTX_DS,
             CTX_ES = const Self::CTX_ES,
             CTX_FS = const Self::CTX_FS,
             CTX_GS = const Self::CTX_GS,
             CTX_USER_CS = const Self::CTX_USER_CS_DESC,
             CTX_USER_DS = const Self::CTX_USER_DS_DESC,
-            USER_CS_IDX = const LEFACY_CSEL.index(),
-            USER_DS_IDX = const LEFACY_DSEL.index(),
+            USER_CS_IDX = const LEGACY_CSEL.index(),
+            USER_DS_IDX = const LEGACY_DSEL.index(),
             options(noreturn)
         );
     }
@@ -647,7 +645,7 @@ impl ContextIndex {
 #[repr(C, align(16))]
 pub struct GlobalDescriptorTable {
     table: [DescriptorEntry; Self::NUM_ITEMS],
-    tss: TaskStateSegment,
+    tss: TaskStateSegment64,
 }
 
 impl !Send for GlobalDescriptorTable {}
@@ -660,7 +658,7 @@ impl GlobalDescriptorTable {
     unsafe fn new() -> Box<Self> {
         let mut gdt = Box::new(GlobalDescriptorTable {
             table: [DescriptorEntry::null(); Self::NUM_ITEMS],
-            tss: TaskStateSegment::new(),
+            tss: TaskStateSegment64::new(),
         });
 
         gdt.set_item(KERNEL_CSEL, DescriptorEntry::flat_code_segment(DPL0, USE64))
@@ -827,7 +825,7 @@ impl InterruptDescriptorTable {
         if !idt.table[table_offset].is_null() {
             panic!("IDT entry #{} is already in use", vec.0);
         }
-        let pair = DescriptorEntry::gate_descriptor(
+        let pair = DescriptorEntry::gate64(
             Offset64(offset as u64),
             KERNEL_CSEL,
             dpl,

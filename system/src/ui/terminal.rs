@@ -9,10 +9,11 @@ use core::task::{Context, Poll};
 use megstd::drawing::*;
 
 const DEFAULT_INSETS: EdgeInsets = EdgeInsets::new(0, 0, 0, 0);
-const DEFAULT_ATTRIBUTE: u8 = 0x07;
-const BG_ALPHA: Alpha8 = Alpha8::new(0xE0);
-// const DEFAULT_ATTRIBUTE: u8 = 0xF8;
+// const DEFAULT_ATTRIBUTE: u8 = 0x07;
+// const BG_ALPHA: Alpha8 = Alpha8::new(0xE0);
+const DEFAULT_ATTRIBUTE: u8 = 0xF8;
 // const BG_ALPHA: Alpha8 = Alpha8::OPAQUE;
+const BG_ALPHA: Alpha8 = Alpha8::new(0xC0);
 
 static TA: TerminalAgent = TerminalAgent::new();
 
@@ -200,6 +201,10 @@ impl Terminal {
     }
 
     fn put_char(&mut self, c: char) -> Option<Rect> {
+        if self.window.validate().is_none() {
+            return None;
+        }
+
         match c {
             '\x08' => {
                 if self.x > 0 {
@@ -277,6 +282,10 @@ impl Terminal {
     }
 
     fn set_needs_update_cursor(&mut self) {
+        if self.window.validate().is_none() {
+            return;
+        }
+
         let w = self.font.em_width();
         let h = self.font.line_height();
         let dims = self.dims();
@@ -326,6 +335,9 @@ impl TtyRead for Terminal {
 
 impl TtyWrite for Terminal {
     fn reset(&mut self) -> Result<(), TtyError> {
+        if self.window.validate().is_none() {
+            return Ok(());
+        }
         let rect = self.window.content_size().into();
         self.window
             .draw_in_rect(rect, |bitmap| {

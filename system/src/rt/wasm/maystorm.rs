@@ -1,5 +1,4 @@
 //! MEG-OS Maystorm2020 Subsystem
-
 use super::*;
 use crate::io::hid_mgr::*;
 use crate::sync::Mutex;
@@ -67,20 +66,25 @@ impl WasmMiniLoader for MyosLoader {
 }
 
 impl WasmEnv for MyosLoader {
-    fn resolve_imports(&self, mod_name: &str, name: &str, type_: &WasmType) -> WasmImportResult {
+    fn resolve_import_func(
+        &self,
+        mod_name: &str,
+        name: &str,
+        type_: &WasmType,
+    ) -> WasmImportFuncResult {
         let signature = type_.signature();
         match mod_name {
             MyosRuntime::MOD_NAME => match (name, signature.as_str()) {
-                ("svc0", "ii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc1", "iii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc2", "iiii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc3", "iiiii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc4", "iiiiii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc5", "iiiiiii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                ("svc6", "iiiiiiii") => WasmImportResult::Ok(MyosRuntime::syscall),
-                _ => WasmImportResult::NoMethod,
+                ("svc0", "ii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc1", "iii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc2", "iiii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc3", "iiiii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc4", "iiiiii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc5", "iiiiiii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                ("svc6", "iiiiiiii") => WasmImportFuncResult::Ok(MyosRuntime::syscall),
+                _ => WasmImportFuncResult::NoMethod,
             },
-            _ => WasmImportResult::NoModule,
+            _ => WasmImportFuncResult::NoModule,
         }
     }
 }
@@ -351,7 +355,7 @@ impl MyosRuntime {
                 let c2 = params.get_point()?;
                 let color = params.get_color()?;
                 let rect = Rect::from(Coordinates::from_diagonal(c1, c2)) + Size::new(1, 1);
-                let offset = Movement::from(rect.origin());
+                let offset = Point::from(rect.origin());
                 window.draw_in_rect(rect, |bitmap| {
                     bitmap.draw_line(c1 - offset, c2 - offset, color);
                 });

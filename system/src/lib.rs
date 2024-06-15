@@ -4,10 +4,8 @@
 #![feature(naked_functions)]
 //
 #![feature(alloc_error_handler)]
-#![feature(error_in_core)]
 //
 #![feature(const_mut_refs)]
-// #![feature(const_trait_impl)]
 #![feature(iter_advance_by)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(negative_impls)]
@@ -23,6 +21,7 @@ pub mod hal;
 pub mod drivers;
 pub mod fs;
 pub mod fw;
+pub mod init;
 pub mod io;
 pub mod mem;
 pub mod r;
@@ -35,9 +34,6 @@ pub mod ui;
 
 #[macro_use]
 pub mod utils;
-
-#[path = "init/init.rs"]
-pub mod init;
 
 pub use crate::hal::*;
 

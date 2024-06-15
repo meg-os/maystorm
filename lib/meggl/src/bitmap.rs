@@ -225,10 +225,10 @@ pub trait DrawRect: SetPixel {
         let height = rect.height();
         self.draw_hline(coords.left_top(), width, color);
         if height > 1 {
-            self.draw_hline(coords.left_bottom() - Movement::new(0, 1), width, color);
+            self.draw_hline(coords.left_bottom() - Point::new(0, 1), width, color);
             if height > 2 {
-                self.draw_vline(coords.left_top() + Movement::new(0, 1), height - 2, color);
-                self.draw_vline(coords.right_top() + Movement::new(-1, 1), height - 2, color);
+                self.draw_vline(coords.left_top() + Point::new(0, 1), height - 2, color);
+                self.draw_vline(coords.right_top() + Point::new(-1, 1), height - 2, color);
             }
         }
     }

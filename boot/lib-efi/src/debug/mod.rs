@@ -1,10 +1,10 @@
-use core::cell::UnsafeCell;
 use core::fmt::Write;
+use core::mem::MaybeUninit;
 use core::slice;
 
 include!("megh0816.rs");
 
-static mut CONSOLE: UnsafeCell<Console> = UnsafeCell::new(Console::new());
+static mut CONSOLE: MaybeUninit<Console> = MaybeUninit::zeroed();
 
 static BIT_MASKS: [u8; 8] = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
 
@@ -25,21 +25,9 @@ impl Console {
     const BG_COLOR: u32 = 0x000000;
     const FG_COLOR: u32 = 0xAAAAAA;
 
-    const fn new() -> Self {
-        Self {
-            base: 0,
-            width: 0,
-            height: 0,
-            stride: 0,
-            cursor: (0, 0),
-            cols: 0,
-            rows: 0,
-        }
-    }
-
     #[inline]
     pub fn shared<'a>() -> &'a mut Self {
-        unsafe { CONSOLE.get_mut() }
+        unsafe { CONSOLE.assume_init_mut() }
     }
 
     #[inline]
@@ -48,15 +36,20 @@ impl Console {
     }
 
     pub unsafe fn init(base: usize, width: usize, height: usize, stride: usize) {
-        let shared = Self::shared();
-        shared.base = base;
-        shared.width = width;
-        shared.height = height;
-        shared.stride = stride;
-        shared.cols = (width - Self::PADDING_X * 2) / FONT_MEGH0816_WIDTH;
-        shared.rows = (height - Self::PADDING_Y * 2) / FONT_MEGH0816_HEIGHT;
-
+        let mut shared = Self {
+            base,
+            width,
+            height,
+            stride,
+            cursor: (0, 0),
+            cols: (width - Self::PADDING_X * 2) / FONT_MEGH0816_WIDTH,
+            rows: (height - Self::PADDING_Y * 2) / FONT_MEGH0816_HEIGHT,
+        };
         shared.fill_rect(0, 0, width, height, 0x000000);
+
+        unsafe {
+            CONSOLE.write(shared);
+        }
     }
 
     pub fn put_char(&mut self, c: char) {

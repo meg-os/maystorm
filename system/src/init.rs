@@ -21,7 +21,7 @@ use megstd::io::Read;
 use megstd::string::*;
 use megstd::time::SystemTime;
 
-static IS_GUI_BOOT: bool = false;
+static IS_GUI_BOOT: bool = true;
 static mut SHUTDOWN_COMMAND: MaybeUninit<EventQueue<ShutdownCommand>> = MaybeUninit::uninit();
 static mut BG_TERMINAL: Option<WindowHandle> = None;
 
@@ -31,7 +31,7 @@ impl SysInit {
     pub fn start(f: fn()) {
         assert_call_once!();
 
-        let point = 14;
+        let point = 20;
         let font = FontDescriptor::new(FontFamily::Monospace, point)
             .unwrap_or(FontManager::monospace_font());
 
@@ -139,7 +139,7 @@ impl SysInit {
                 .font(&font)
                 .color(Color::WHITE)
                 .middle_center()
-                .shadow(Color::from_argb(0xFF333333), Movement::new(2, 2))
+                .shadow(Color::from_argb(0xFF333333), Point::new(2, 2))
                 .text("Shutting down")
                 .draw_text(bitmap, bitmap.bounds(), 0);
         });
@@ -176,7 +176,9 @@ impl SysInit {
         };
 
         match command {
-            ShutdownCommand::Reboot => reboot(),
+            ShutdownCommand::Reboot => {
+                reboot();
+            }
             ShutdownCommand::Shutdown => {
                 // TODO:
                 reboot()
@@ -251,7 +253,6 @@ async fn slpash_task(f: fn()) {
         Scheduler::spawn_async(activity_monitor_main());
         Scheduler::spawn_async(_notification_task());
 
-        let mut wall_loaded = false;
         for path in ["/boot/wall.mpic", "/boot/wall.jpg", "/boot/wall.png"] {
             if let Ok(mut file) = FileManager::open(path, OpenOptions::new().read(true)) {
                 let mut vec = Vec::new();
@@ -261,13 +262,9 @@ async fn slpash_task(f: fn()) {
                 if let Ok(bitmap) = ImageLoader::load(vec.as_slice()) {
                     let bitmap = BitmapRef::from(bitmap.as_ref());
                     WindowManager::set_desktop_bitmap(&bitmap);
-                    wall_loaded = true;
                     break;
                 }
             }
-        }
-        if !wall_loaded {
-            WindowManager::set_desktop_color(Theme::shared().default_desktop_color());
         }
 
         Timer::sleep_async(Duration::from_millis(500)).await;
@@ -458,11 +455,11 @@ fn format_bytes(sb: &mut dyn Write, val: usize) -> core::fmt::Result {
 async fn activity_monitor_main() {
     let bg_color = Color::WHITE;
     let fg_color = Color::DARK_GRAY;
-    let graph_border_color = Color::GREEN;
+    let graph_border_color = Color::LIGHT_GRAY;
     let graph_sub_color = Color::LIGHT_GRAY;
     let graph_line_color = Color::LIGHT_MAGENTA;
     let graph_main_color1 = Color::LIGHT_RED;
-    let graph_main_color2 = Color::LIGHT_GREEN;
+    let graph_main_color2 = Color::YELLOW;
     let graph_main_color3 = Color::LIGHT_GRAY;
     let margin = EdgeInsets::new(0, 0, 0, 0);
 
@@ -605,7 +602,7 @@ async fn activity_monitor_main() {
                                 let value = usage_temp[cpu_index];
                                 let graph_color = if value < 250 {
                                     graph_main_color1
-                                } else if value < 750 {
+                                } else if value < 500 {
                                     graph_main_color2
                                 } else {
                                     graph_main_color3
@@ -844,15 +841,16 @@ async fn test_window_main() {
     let bg_color = Color::from_argb(0x80FFFFFF);
     // Timer::sleep_async(Duration::from_millis(500)).await;
 
-    let width = 640;
-    let height = 480;
+    let screen_bounds = WindowManager::user_screen_bounds();
+    let width = screen_bounds.width() - 160;
+    let height = screen_bounds.height() - 120;
     let window = RawWindowBuilder::new()
         .size(Size::new(width, height))
         .bg_color(bg_color)
         .inactive_title_color(bg_color)
         // .active_title_color(Color::LIGHT_BLUE)
         .level(WindowLevel::POPUP)
-        .build("Welcome to ようこそ!");
+        .build("ようこそ");
     window.set_back_button_enabled(true);
 
     window.draw(|bitmap| {
@@ -884,7 +882,7 @@ async fn test_window_main() {
                     .font(&FontDescriptor::new(FontFamily::SansSerif, 32).unwrap())
                     .middle_center()
                     .color(Color::WHITE)
-                    .text("ようこそ MYOS!")
+                    .text("ようこそ世界!")
                     .draw_text(&mut bitmap, rect, 1);
             });
         }
@@ -903,7 +901,7 @@ async fn test_window_main() {
                     FontFamily::Monospace,
                     // FontFamily::Cursive,
                 ] {
-                    for point in [48, 32, 28, 24, 20, 16] {
+                    for point in [32, 28, 24, 20, 16] {
                         offset += font_test(&mut bitmap, offset, Color::BLACK, family, point);
                     }
                 }
@@ -932,7 +930,7 @@ async fn test_window_main() {
                     .font(&font)
                     .middle_center()
                     .color(Theme::shared().button_default_foreground())
-                    .text("Ok")
+                    .text("オッケー")
                     .draw_text(&mut bitmap, rect, 1);
             });
         }
@@ -959,7 +957,7 @@ async fn test_window_main() {
                     .font(&font)
                     .middle_center()
                     .color(Theme::shared().button_destructive_foreground())
-                    .text("Cancel")
+                    .text("取　消")
                     .draw_text(&mut bitmap, rect, 1);
             });
         }
@@ -990,19 +988,26 @@ fn font_test(
 ) -> i32 {
     let max_lines = 0;
     let font = FontDescriptor::new(family, point).unwrap();
-    let rect = Rect::new(0, offset, bitmap.width(), u32::MAX);
+    let rect = Rect::new(
+        0,
+        offset,
+        bitmap.width(),
+        bitmap.height(), //u32::MAX
+    );
 
     let ats = AttributedString::new()
         .font(&font)
         .top_left()
         .color(color)
         .line_break_mode(LineBreakMode::NoWrap)
-        .shadow(TrueColor::from_argb(0x80CCCCCC).into(), Movement::new(2, 2))
+        .shadow(TrueColor::from_argb(0x80CCCCCC).into(), Point::new(2, 2))
         // .text("あのイーハトーヴォのすきとおった風、夏でも底に冷たさをもつ青いそら、うつくしい森で飾られたモリーオ市、郊外のぎらぎらひかる草の波。");
         // .text("The quick brown fox jumps over the lazy dog.");
-        .text("WAVE AVATAR Lorem ipsum dolor sit amet, consectetur adipiscing elit,");
+        .text("WAVE AVATAR あのイーハトーヴォのすきとおった風 Lorem ipsum dolor sit amet, consectetur adipiscing elit,");
 
     let bounds = ats.bounding_size(rect.size(), max_lines);
+    let rect = Rect::new(0, offset, bounds.width(), bounds.height());
+    // bitmap.draw_rect(rect, Color::RED);
     ats.draw_text(bitmap, rect, max_lines);
 
     bounds.height() as i32

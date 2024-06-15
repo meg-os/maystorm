@@ -63,7 +63,7 @@ impl DescriptorEntry {
     }
 
     #[inline]
-    pub fn tss_descriptor(base: Linear64, limit: Limit16) -> DescriptorPair {
+    pub fn tss64(base: Linear64, limit: Limit16) -> DescriptorPair {
         let (base_low, base_high) = base.as_segment_base_pair();
         let low = DescriptorEntry(
             DescriptorType::Tss.as_descriptor_entry()
@@ -76,7 +76,7 @@ impl DescriptorEntry {
     }
 
     #[inline]
-    pub fn gate_descriptor(
+    pub fn gate64(
         offset: Offset64,
         sel: Selector,
         dpl: DPL,
@@ -583,7 +583,7 @@ impl From<ExceptionType> for InterruptVector {
 
 #[repr(C, packed)]
 #[derive(Default)]
-pub struct TaskStateSegment {
+pub struct TaskStateSegment64 {
     _reserved_1: u32,
     pub stack_pointer: [u64; 3],
     _reserved_2: [u32; 2],
@@ -592,9 +592,9 @@ pub struct TaskStateSegment {
     pub iomap_base: u16,
 }
 
-impl !Send for TaskStateSegment {}
+impl !Send for TaskStateSegment64 {}
 
-impl TaskStateSegment {
+impl TaskStateSegment64 {
     pub const OFFSET_RSP0: usize = 0x04;
 
     pub const LIMIT: u16 = 0x67;
@@ -613,7 +613,7 @@ impl TaskStateSegment {
 
     #[inline]
     pub fn as_descriptor_pair(&self) -> DescriptorPair {
-        DescriptorEntry::tss_descriptor(
+        DescriptorEntry::tss64(
             Linear64(self as *const _ as usize as u64),
             Limit16(Self::LIMIT),
         )

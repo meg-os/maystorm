@@ -9,4 +9,4 @@ version = "0.1.0"
 # [features]
 
 [dependencies]
-paste = { version = "1.0.14" }
+paste = { version = "1.0.15" }

@@ -4,6 +4,7 @@ use crate::msr::MSR;
 
 /// **IA32_EFER**: Extended Feature Enables Register *(MSR C000_0080)*
 #[repr(transparent)]
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct EFER(u64);
 

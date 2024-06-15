@@ -49,6 +49,7 @@ The latest version is recommended whenever possible.
 
 ## HOE: Haribote-OS Emulation Subsystem
 
+* Some uncompressed Haribote-OS apps will work; some apps may not work due to different basic OS behaviour.
 * This subsystem may be replaced by another implementation in the future.
 
 ## History

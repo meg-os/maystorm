@@ -1,6 +1,7 @@
 use core::ops::{Deref, DerefMut, Range};
 use core::ptr;
 
+#[repr(C)]
 pub struct FixedVec<T, const N: usize> {
     data: [T; N],
     len: usize,
@@ -8,12 +9,12 @@ pub struct FixedVec<T, const N: usize> {
 
 impl<T, const N: usize> FixedVec<T, N> {
     #[inline]
-    pub const fn new(template: T) -> Self
+    pub const fn new(empty_value: T) -> Self
     where
         T: Copy,
     {
         Self {
-            data: [template; N],
+            data: [empty_value; N],
             len: 0,
         }
     }

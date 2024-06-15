@@ -1,5 +1,6 @@
 
 [workspace]
+resolver = "2"
 members = [
   "bball",
   "cube",
@@ -17,4 +18,4 @@ opt-level = "z"
 
 [workspace.dependencies]
 megstd = { path = "../lib/megstd" }
-libm = { features = ["unstable"] }
+libm = { version="0.2.8", features = ["unstable"] }

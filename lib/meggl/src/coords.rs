@@ -109,12 +109,10 @@ impl SubAssign<GlSInt> for Point {
     }
 }
 
-pub type Movement = Point;
-
-impl Add<Movement> for Rect {
+impl Add<Point> for Rect {
     type Output = Self;
     #[inline]
-    fn add(self, rhs: Movement) -> Self::Output {
+    fn add(self, rhs: Point) -> Self::Output {
         Rect {
             origin: Point {
                 x: self.origin.x + rhs.x,
@@ -125,17 +123,17 @@ impl Add<Movement> for Rect {
     }
 }
 
-impl AddAssign<Movement> for Rect {
+impl AddAssign<Point> for Rect {
     #[inline]
-    fn add_assign(&mut self, rhs: Movement) {
+    fn add_assign(&mut self, rhs: Point) {
         *self = self.add(rhs);
     }
 }
 
-impl Sub<Movement> for Rect {
+impl Sub<Point> for Rect {
     type Output = Self;
     #[inline]
-    fn sub(self, rhs: Movement) -> Self::Output {
+    fn sub(self, rhs: Point) -> Self::Output {
         Rect {
             origin: Point {
                 x: self.origin.x - rhs.x,
@@ -146,9 +144,9 @@ impl Sub<Movement> for Rect {
     }
 }
 
-impl SubAssign<Movement> for Rect {
+impl SubAssign<Point> for Rect {
     #[inline]
-    fn sub_assign(&mut self, rhs: Movement) {
+    fn sub_assign(&mut self, rhs: Point) {
         *self = self.sub(rhs);
     }
 }

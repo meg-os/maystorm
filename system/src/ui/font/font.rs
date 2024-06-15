@@ -255,7 +255,7 @@ pub trait FontDriver {
 pub struct FixedFontDriver<'a> {
     size: Size,
     data: &'a [u8],
-    offset: Movement,
+    offset: Point,
     line_height: u32,
     stride: usize,
 }
@@ -263,7 +263,7 @@ pub struct FixedFontDriver<'a> {
 impl FixedFontDriver<'_> {
     pub const fn new(width: u32, height: u32, data: &'static [u8]) -> FixedFontDriver<'static> {
         let line_height = height * 5 / 4;
-        let offset = Movement::new(0, (line_height as i32 - height as i32) / 2);
+        let offset = Point::new(0, (line_height as i32 - height as i32) / 2);
         let stride = ((width as usize + 7) >> 3) * height as usize;
         FixedFontDriver {
             size: Size::new(width, height),
@@ -423,10 +423,10 @@ impl FontDriver for TrueTypeFont {
         self.font.outline_glyph(glyph).map(|glyph| {
             let bounds = glyph.px_bounds();
 
-            let origin = origin + Movement::new(bounds.min.x as i32, ascent + bounds.min.y as i32);
+            let origin = origin + Point::new(bounds.min.x as i32, ascent + bounds.min.y as i32);
             let color = color.into_true_color();
             glyph.draw(|x, y, a| {
-                let point = origin + Movement::new(x as i32, y as i32);
+                let point = origin + Point::new(x as i32, y as i32);
                 bitmap
                     .get_pixel_mut(point)
                     .map(|v| v.blend(color.with_opacity(a.into())));

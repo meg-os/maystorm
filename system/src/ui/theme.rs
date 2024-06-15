@@ -81,7 +81,7 @@ impl Theme {
 
     #[inline]
     pub const fn window_title_active_background(&self) -> Color {
-        Color::from_argb(0xF0EFEEF7)
+        Color::WHITE
     }
 
     #[inline]

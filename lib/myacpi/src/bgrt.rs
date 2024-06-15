@@ -2,6 +2,7 @@ use super::*;
 
 /// Boot Graphics Resource Table
 #[repr(C, packed)]
+#[allow(dead_code)]
 pub struct Bgrt {
     hdr: AcpiHeader,
     version: u16,
