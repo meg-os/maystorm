@@ -277,7 +277,7 @@ impl HdAudioController {
         this.sem_event_thread.signal();
     }
 
-    /// xHCI Main event loop
+    /// event loop
     fn _event_thread(self: Arc<Self>) {
         loop {
             self.sem_event_thread.wait();
@@ -1044,7 +1044,7 @@ pub struct GlobalRegisterSet {
     _rsrv_1c_1f: [u8; 4],
     intcnt: MmioRegU32,
     intsts: MmioRegU32,
-    _rsrc_28_2f: [u8; 8],
+    _rsrv_28_2f: [u8; 8],
     counter: MmioRegU32,
     ssync: MmioRegU32,
 }
@@ -1983,7 +1983,7 @@ pub enum DefaultDevice {
     Telephony = 0xB,
     SPDIFIn = 0xC,
     DigitalOtherIn = 0xD,
-    Reserved = 0xE,
+    _Reserved = 0xE,
     Other = 0xF,
 }
 
@@ -2018,12 +2018,12 @@ pub enum GeometricLocation {
     Special1 = 0x7,
     Special2 = 0x8,
     Special3 = 0x9,
-    Resvd1 = 0xA,
-    Resvd2 = 0xB,
-    Resvd3 = 0xC,
-    Resvd4 = 0xD,
-    Resvd5 = 0xE,
-    Resvd6 = 0xF,
+    _Resvd1 = 0xA,
+    _Resvd2 = 0xB,
+    _Resvd3 = 0xC,
+    _Resvd4 = 0xD,
+    _Resvd5 = 0xE,
+    _Resvd6 = 0xF,
 }
 
 #[repr(u8)]
@@ -2039,10 +2039,10 @@ pub enum Color {
     Yellow = 0x7,
     Purple = 0x8,
     Pink = 0x9,
-    Resvd1 = 0xA,
-    Resvd2 = 0xB,
-    Resvd3 = 0xC,
-    Resvd4 = 0xD,
+    _Resvd1 = 0xA,
+    _Resvd2 = 0xB,
+    _Resvd3 = 0xC,
+    _Resvd4 = 0xD,
     White = 0xE,
     Other = 0xF,
 }

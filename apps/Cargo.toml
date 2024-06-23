@@ -9,7 +9,6 @@ members = [
   "kray",
   "life",
   "noiz2bg",
-  "tube",
 ]
 
 [profile.release]

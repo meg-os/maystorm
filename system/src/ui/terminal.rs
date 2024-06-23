@@ -9,11 +9,13 @@ use core::task::{Context, Poll};
 use megstd::drawing::*;
 
 const DEFAULT_INSETS: EdgeInsets = EdgeInsets::new(0, 0, 0, 0);
-// const DEFAULT_ATTRIBUTE: u8 = 0x07;
-// const BG_ALPHA: Alpha8 = Alpha8::new(0xE0);
-const DEFAULT_ATTRIBUTE: u8 = 0xF8;
-// const BG_ALPHA: Alpha8 = Alpha8::OPAQUE;
+
+const DEFAULT_ATTRIBUTE: u8 = 0x07;
+// const DEFAULT_ATTRIBUTE: u8 = 0xF8;
+
 const BG_ALPHA: Alpha8 = Alpha8::new(0xC0);
+// const BG_ALPHA: Alpha8 = Alpha8::new(0xE0);
+// const BG_ALPHA: Alpha8 = Alpha8::OPAQUE;
 
 static TA: TerminalAgent = TerminalAgent::new();
 
@@ -153,7 +155,7 @@ impl Terminal {
                 window_size.height,
             ))
             .bg_color(bg_color)
-            // .style_add(WindowStyle::DARK_MODE)
+            .style_add(WindowStyle::DARK_MODE)
             .build("Terminal");
 
         Self {
