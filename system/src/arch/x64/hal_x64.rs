@@ -1,19 +1,14 @@
-use crate::{
-    arch::{
-        apic::Apic,
-        cpu::{Cpu, Rflags},
-        page::PageManager,
-    },
-    drivers::pci::PciConfigAddress,
-    hal::*,
-    system::ProcessorIndex,
-    *,
-};
-use core::{
-    arch::asm,
-    fmt,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use crate::arch::apic::Apic;
+use crate::arch::cpu::Cpu;
+use crate::arch::page::PageManager;
+use crate::drivers::pci::PciConfigAddress;
+use crate::hal::*;
+use crate::system::ProcessorIndex;
+use crate::*;
+use core::arch::asm;
+use core::fmt;
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use x86::gpr::Rflags;
 
 #[derive(Clone, Copy)]
 pub struct Hal;
@@ -41,7 +36,7 @@ struct CpuImpl;
 impl HalCpu for CpuImpl {
     #[inline]
     fn current_processor_index(&self) -> ProcessorIndex {
-        ProcessorIndex(unsafe { Cpu::rdtscp().1 } as usize)
+        ProcessorIndex(Cpu::rdtscp().1 as usize)
     }
 
     #[inline]
@@ -75,12 +70,7 @@ impl HalCpu for CpuImpl {
 
     #[inline]
     unsafe fn is_interrupt_enabled(&self) -> bool {
-        let flags: usize;
-        asm!("
-            pushfq
-            pop {}
-            ", out(reg)flags);
-        Rflags::from_bits_retain(flags).contains(Rflags::IF)
+        Rflags::read().contains(Rflags::IF)
     }
 
     fn reset(&self) -> ! {
@@ -232,6 +222,11 @@ impl Spinlock {
 
 impl HalSpinlock for Spinlock {
     #[inline]
+    fn is_locked(&self) -> bool {
+        self.value.load(Ordering::Relaxed) == Self::LOCKED_VALUE
+    }
+
+    #[inline]
     #[must_use]
     fn try_lock(&self) -> bool {
         self.value
@@ -311,8 +306,8 @@ impl PhysicalAddress {
     }
 
     #[inline]
-    pub const fn direct_unmap(va: usize) -> PhysicalAddress {
-        PageManager::direct_unmap(va)
+    pub fn direct_unmap<T>(ptr: *const T) -> Option<PhysicalAddress> {
+        PageManager::direct_unmap(ptr as usize)
     }
 }
 

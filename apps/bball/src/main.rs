@@ -14,9 +14,9 @@ fn _start() {
             for (j, c2) in COORD_TABLE[i..].iter().enumerate() {
                 let dis = if j < 8 { j } else { 15 - j };
                 ctx.draw_line(
-                    Point::new(c1.0 as isize, c1.1 as isize),
-                    Point::new(c2.0 as isize, c2.1 as isize),
-                    PackedColor(16 - dis as u32),
+                    Point::new(c1.0 as i32, c1.1 as i32),
+                    Point::new(c2.0 as i32, c2.1 as i32),
+                    IndexedColor(16 - dis as u8).into(),
                 );
             }
         }

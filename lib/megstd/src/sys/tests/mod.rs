@@ -6,7 +6,7 @@ pub mod window {}
 pub mod fs_imp;
 
 pub mod path {
-    pub const MAIN_SEP_STR: &'static str = "/";
+    pub const MAIN_SEPARATOR: &'static str = "/";
 }
 
 pub mod fcntl {

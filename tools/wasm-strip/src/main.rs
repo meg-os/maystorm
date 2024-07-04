@@ -2,13 +2,11 @@
 // Copyright(c) 2021 The MEG-OS Project
 
 use core::f64;
-use std::{
-    env,
-    fs::File,
-    io::{Read, Write},
-    path::Path,
-    process,
-};
+use std::env;
+use std::fs::File;
+use std::io::{Read, Write};
+use std::path::Path;
+use std::process;
 use wasm_strip::wasm::*;
 
 fn usage() -> ! {
@@ -82,7 +80,7 @@ fn main() {
         drop(is);
         let org_size = ib.len();
 
-        if !WasmMiniLoader::identity(ib.as_slice()) {
+        if !WasmMiniLoader::identify(ib.as_slice()) {
             panic!("bad signature found");
         }
         let sections = WasmMiniLoader::load_sections(ib.as_slice()).unwrap();

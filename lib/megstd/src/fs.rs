@@ -1,12 +1,10 @@
 // File I/O
 // Most of them are clones of Rust's original definition.
 
-use crate::{
-    io::{Read, Result, Write},
-    path::*,
-    sys::fs_imp,
-    *,
-};
+use crate::io::{Read, Result, Write};
+use crate::path::*;
+use crate::prelude::*;
+use crate::sys::fs_imp;
 
 pub struct File {
     _phantom: (),

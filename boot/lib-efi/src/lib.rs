@@ -1,9 +1,14 @@
 #![no_std]
 #![feature(alloc_error_handler)]
 
-use alloc::{boxed::Box, vec::Vec};
-use core::{fmt::Write, panic::PanicInfo};
-use uefi::{prelude::*, proto::media::file::*, CStr16};
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::fmt::Write;
+use core::panic::PanicInfo;
+use uefi::prelude::*;
+use uefi::proto::media::file::*;
+use uefi::CStr16;
+
 extern crate alloc;
 
 pub mod debug;
@@ -17,17 +22,14 @@ fn panic(info: &PanicInfo) -> ! {
 #[macro_export]
 macro_rules! print {
     ($($arg:tt)*) => {
-        write!(debug::Console::shared(), $($arg)*).unwrap()
+        let _ = write!(debug::Console::shared(), $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! println {
-    ($fmt:expr) => {
-        print!(concat!($fmt, "\r\n"))
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        print!(concat!($fmt, "\r\n"), $($arg)*)
+    ($($arg:tt)*) => {
+        let _ = writeln!(debug::Console::shared(), $($arg)*);
     };
 }
 

@@ -7,7 +7,7 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libm = {}
-num-derive = {default-features = false}
-num-traits = {default-features = false}
-paste = {}
+libm = { version="0.2.8",features = ["unstable"] }
+paste = {version="1.0.15"}
+num-derive = { version="0.4.2",default-features = false }
+num-traits = { version="0.2.19",default-features = false }

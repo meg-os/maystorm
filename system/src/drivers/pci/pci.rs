@@ -1,7 +1,10 @@
 use super::install_drivers;
-use crate::{sync::RwLock, system::System, *};
-use alloc::{boxed::Box, collections::BTreeMap, format, string::String, sync::Arc, vec::Vec};
-use core::{cell::UnsafeCell, fmt, num::NonZeroU8, ops::Add};
+use crate::sync::RwLock;
+use crate::*;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::num::NonZeroU8;
+use core::ops::Add;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PciConfigAddress {
@@ -404,7 +407,9 @@ impl PciDevice {
             .capabilities()
             .find(|(id, _)| *id == PciCapabilityId::MSI)
             .map(|(_, offset)| *offset)
-            else { return Err(()) };
+        else {
+            return Err(());
+        };
         let (msi_addr, msi_data) = match Hal::pci().register_msi(f, arg) {
             Ok(v) => v,
             Err(_) => return Err(()),

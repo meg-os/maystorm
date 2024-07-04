@@ -1,9 +1,9 @@
 use super::apic::*;
-use crate::{mem::mmio::*, task::scheduler::*, *};
-use core::{
-    sync::atomic::{AtomicBool, AtomicU64, Ordering},
-    time::Duration,
-};
+use crate::mem::mmio::*;
+use crate::task::scheduler::*;
+use crate::*;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use core::time::Duration;
 
 /// High Precision Event Timer
 pub(super) struct Hpet {

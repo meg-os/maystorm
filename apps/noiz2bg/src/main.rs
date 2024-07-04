@@ -1,4 +1,7 @@
 /*
+Ported
+Original: UNKNOWN
+
 License
 -------
 Copyright 2002 Kenta Cho. All rights reserved.
@@ -29,8 +32,8 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #![no_std]
 
 use core::cell::UnsafeCell;
-
-use megstd::{sys::syscall::*, window::*};
+use megstd::sys::syscall::*;
+use megstd::window::*;
 
 #[no_mangle]
 fn _start() {
@@ -44,17 +47,17 @@ struct App<'a> {
     boards: [Option<Board>; App::BOARD_MAX],
     scene: Scene,
     scene_count: usize,
-    board_mx: isize,
-    board_my: isize,
-    board_repx: isize,
-    board_repy: isize,
-    board_rep_xn: isize,
-    board_rep_yn: isize,
+    board_mx: i32,
+    board_my: i32,
+    board_repx: i32,
+    board_repy: i32,
+    board_rep_xn: i32,
+    board_rep_yn: i32,
 }
 
-const BITMAP_WIDTH: isize = 256;
-const BITMAP_HEIGHT: isize = 256;
-const BITMAP_SIZE: usize = (BITMAP_WIDTH * BITMAP_HEIGHT) as usize;
+const BITMAP_WIDTH: u32 = 256;
+const BITMAP_HEIGHT: u32 = 256;
+const BITMAP_SIZE: usize = BITMAP_WIDTH as usize * BITMAP_HEIGHT as usize;
 static mut DATA: UnsafeCell<[u32; BITMAP_SIZE]> = UnsafeCell::new([0; BITMAP_SIZE]);
 
 impl<'a> App<'a> {
@@ -64,6 +67,7 @@ impl<'a> App<'a> {
             .size(Size::new(BITMAP_WIDTH, BITMAP_HEIGHT))
             .opaque()
             .bitmap_argb32()
+            .max_fps(50)
             .build("noiz2bg");
         let bitmap = BitmapRefMut32::from_bytes(
             unsafe { DATA.get_mut() },
@@ -125,13 +129,15 @@ impl App<'_> {
         let osx = (0 - self.board_repx) * (self.board_rep_xn / 2);
         let osy = (0 - self.board_repy) * (self.board_rep_yn / 2);
         for board in &self.boards {
-            let Some(board) =  board else { break };
+            let Some(board) = board else { break };
             let mut ox = osx;
             for _ in 0..self.board_rep_xn {
                 let mut oy = osy;
                 for _ in 0..self.board_rep_yn {
-                    let x = (board.x + ox).checked_div(board.z).unwrap_or(0) + BITMAP_WIDTH / 2;
-                    let y = (board.y + oy).checked_div(board.z).unwrap_or(0) + BITMAP_HEIGHT / 2;
+                    let x =
+                        (board.x + ox).checked_div(board.z).unwrap_or(0) + BITMAP_WIDTH as i32 / 2;
+                    let y =
+                        (board.y + oy).checked_div(board.z).unwrap_or(0) + BITMAP_HEIGHT as i32 / 2;
                     let width = board.width;
                     let height = board.height;
                     if false {
@@ -140,10 +146,10 @@ impl App<'_> {
                     } else {
                         os_blend_rect(
                             &self.bitmap as *const _ as usize,
-                            x as usize,
-                            y as usize,
-                            width as usize,
-                            height as usize,
+                            x,
+                            y,
+                            width,
+                            height,
                             board.color.argb(),
                         );
                     }
@@ -168,8 +174,8 @@ impl App<'_> {
                                 i * 16384,
                                 j * 16384,
                                 500,
-                                10000 + (i * 12345) % 3000,
-                                10000 + (j * 54321) % 3000,
+                                10000 + (i as u32 * 12345) % 3000,
+                                10000 + (j as u32 * 54321) % 3000,
                             );
                         }
                     }
@@ -180,8 +186,8 @@ impl App<'_> {
                             0,
                             i * 16384,
                             500 - j * 50,
-                            20000 - j * 1000,
-                            12000 - j * 500,
+                            20000 - j as u32 * 1000,
+                            12000 - j as u32 * 500,
                         );
                     }
                 }
@@ -235,8 +241,8 @@ impl App<'_> {
                                 i * 16384,
                                 j * 16384,
                                 500,
-                                12000 + (i * 12345) % 3000,
-                                12000 + (j * 54321) % 3000,
+                                12000 + (i as u32 * 12345) % 3000,
+                                12000 + (j as u32 * 54321) % 3000,
                             );
                         }
                     }
@@ -248,8 +254,8 @@ impl App<'_> {
                                 i * 16384,
                                 j * 16384,
                                 480,
-                                9000 + (i * 12345) % 3000,
-                                9000 + (j * 54321) % 3000,
+                                9000 + (i as u32 * 12345) % 3000,
+                                9000 + (j as u32 * 54321) % 3000,
                             );
                         }
                     }
@@ -310,7 +316,7 @@ impl App<'_> {
         }
     }
 
-    fn add_board(&mut self, x: isize, y: isize, z: isize, width: isize, height: isize) {
+    fn add_board(&mut self, x: i32, y: i32, z: i32, width: u32, height: u32) {
         if self.board_index >= Self::BOARD_MAX {
             return;
         }
@@ -320,12 +326,12 @@ impl App<'_> {
                 x,
                 y,
                 z,
-                width.checked_div(z).unwrap_or(0),
-                height.checked_div(z).unwrap_or(0),
+                width.checked_div(z as u32).unwrap_or(0),
+                height.checked_div(z as u32).unwrap_or(0),
                 ColorComponents {
-                    a: Alpha8(0x30),
-                    r: (0x99isize * 256).checked_div(1 + z).unwrap_or(0) as u8,
-                    g: (0xAAisize * 256).checked_div(1 + z).unwrap_or(0) as u8,
+                    a: Alpha8::new(0x30),
+                    r: (0x9900i32).checked_div(1 + z).unwrap_or(0) as u8,
+                    g: (0xAA00i32).checked_div(1 + z).unwrap_or(0) as u8,
                     b: 0xDD,
                 }
                 .into(),
@@ -337,24 +343,17 @@ impl App<'_> {
 
 #[derive(Debug, Clone, Copy)]
 struct Board {
-    x: isize,
-    y: isize,
-    z: isize,
-    width: isize,
-    height: isize,
+    x: i32,
+    y: i32,
+    z: i32,
+    width: u32,
+    height: u32,
     color: TrueColor,
 }
 
 impl Board {
     #[inline]
-    const fn new(
-        x: isize,
-        y: isize,
-        z: isize,
-        width: isize,
-        height: isize,
-        color: TrueColor,
-    ) -> Self {
+    const fn new(x: i32, y: i32, z: i32, width: u32, height: u32, color: TrueColor) -> Self {
         Self {
             x,
             y,

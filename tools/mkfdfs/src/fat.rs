@@ -58,19 +58,6 @@ impl DosBpb {
             n_heads,
         }
     }
-
-    pub fn parse_type(opt: &str) -> Option<Self> {
-        match opt {
-            "2hd" | "1440" => Some(Self::new(512, 1, 1, 2, 224, 80 * 2 * 18, 0xF0, 9, 18, 2)),
-            "2hc" | "1200" => Some(Self::new(512, 1, 1, 2, 224, 80 * 2 * 15, 0xF9, 7, 15, 2)),
-            "nec" | "1232" => Some(Self::new(1024, 1, 1, 2, 192, 77 * 2 * 8, 0xFE, 2, 8, 2)),
-            "2dd" | "720" => Some(Self::new(512, 2, 1, 2, 112, 80 * 2 * 9, 0xF9, 3, 9, 2)),
-            "640" => Some(Self::new(512, 2, 1, 2, 112, 80 * 2 * 8, 0xFB, 2, 8, 2)),
-            "320" => Some(Self::new(512, 2, 1, 2, 112, 40 * 2 * 8, 0xFF, 2, 8, 2)),
-            "160" => Some(Self::new(512, 1, 1, 2, 64, 40 * 1 * 8, 0xFE, 1, 8, 1)),
-            _ => None,
-        }
-    }
 }
 
 impl DosExtendedBpb {
@@ -152,6 +139,7 @@ pub struct DosDirEnt {
 }
 
 bitflags! {
+    #[derive(Clone, Copy)]
     pub struct DosAttributes: u8 {
         const READONLY  = 0b0000_0001;
         const HIDDEN    = 0b0000_0010;
@@ -160,7 +148,7 @@ bitflags! {
         const SUBDIR    = 0b0001_0000;
         const ARCHIVE   = 0b0010_0000;
 
-        const LFN_ENTRY = Self::READONLY.bits | Self::HIDDEN.bits | Self::SYSTEM.bits | Self::LABEL.bits;
+        const LFN_ENTRY = Self::READONLY.bits() | Self::HIDDEN.bits() | Self::SYSTEM.bits() | Self::LABEL.bits();
     }
 }
 

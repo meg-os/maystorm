@@ -1,10 +1,8 @@
 //! Spinlock
 
 use crate::*;
-use core::{
-    cell::UnsafeCell,
-    ops::{Deref, DerefMut},
-};
+use core::cell::UnsafeCell;
+use core::ops::{Deref, DerefMut};
 
 /// Mutual exclusion primitives like std::sync::Mutex implemented in Spinlock
 pub struct SpinMutex<T: ?Sized> {

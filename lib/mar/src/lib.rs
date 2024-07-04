@@ -1,40 +1,41 @@
 //! MEG-OS Flattened Archive File
 //!
-//! archive:
-//! header, tagged<any>, ..., tagged<end>
+//! # archive:
+//! * header, tagged&lt;any&gt;, ..., tagged&lt;end&gt;
 //!
-//! tagged:
-//! tag: u8
-//! payload: blob
+//! # tagged &lt;tag&gt;:
+//! * tag: u8
+//! * payload: blob
 //!
-//! blob:
-//! size: leb128
-//! payload: Array of u8
+//! # blob:
+//! * size: leb128
+//! * payload: Array of u8
 //!
-//! str: utf8 string
-//! size: leb128
-//! payload: Array of u8
+//! # str: utf8 string
+//! * size: leb128
+//! * payload: Array of u8
 //!
-//! xattr: extended file attributes (TBD)
-//! size: leb128
-//! payload: Array of TBD
+//! # xattr: extended file attributes (TBD)
+//! * size: leb128
+//! * payload: Array of TBD
 //!
-//! end:
-//! tag: TAG_END(1)
+//! # end:
+//! * tag: TAG_END(1)
 //!
-//! namespace: sub directory
-//! tag: TAG_NAMESPACE(2)
-//! name: str
-//! xattr: xattr
+//! # namespace: sub directory
+//! * tag: TAG_NAMESPACE(2)
+//! * name: str
+//! * xattr: xattr
 //!
-//! file:
-//! tag: TAG_FILE(3)
-//! name: str
-//! xattr: xattr
-//! content: blob
+//! # file:
+//! * tag: TAG_FILE(3)
+//! * name: str
+//! * xattr: xattr
+//! * content: blob
+//!
 #![cfg_attr(not(test), no_std)]
-
 extern crate alloc;
+#[allow(unused_imports)]
 use alloc::vec::Vec;
 use core::mem::transmute;
 

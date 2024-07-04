@@ -1,7 +1,10 @@
 //! xHC Data Structures
 
-use crate::{drivers::usb::*, *};
-use core::{mem::transmute, num::NonZeroU8, sync::atomic::*};
+use crate::drivers::usb::*;
+use crate::*;
+use core::mem::transmute;
+use core::num::NonZeroU8;
+use core::sync::atomic::*;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -1105,8 +1108,8 @@ impl EndpointContext {
     }
 
     #[inline]
-    pub fn set_max_packet_size(&mut self, max_packet_size: usize) {
-        self.data[1] = self.data[1] & 0x0000_FFFF | ((max_packet_size as u32) << 16);
+    pub fn set_max_packet_size(&mut self, max_packet_size: UsbLength) {
+        self.data[1] = self.data[1] & 0x0000_FFFF | ((max_packet_size.0 as u32) << 16);
     }
 
     #[inline]

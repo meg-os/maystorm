@@ -1,7 +1,8 @@
 //! MEG-OS standard library like `std`
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![feature(alloc_error_handler)]
 #![feature(asm_experimental_arch)]
+#![feature(cfg_match)]
 
 #[macro_use]
 pub mod sys;
@@ -17,7 +18,8 @@ pub mod path;
 pub mod rand;
 pub mod string;
 pub mod time;
-pub mod uuid;
+
+pub use uuid;
 
 #[cfg(feature = "window")]
 #[allow(unused_imports)]
@@ -27,19 +29,18 @@ pub mod window {
 
 extern crate alloc;
 
-pub use prelude::*;
 #[allow(unused_imports)]
-mod prelude {
-    pub use crate::{osstr::*, sys::prelude::*};
-    pub use alloc::{
-        borrow::ToOwned,
-        boxed::Box,
-        collections::btree_map::BTreeMap,
-        format,
-        rc::Rc,
-        string::String,
-        string::ToString,
-        sync::{Arc, Weak},
-        vec::Vec,
-    };
+pub mod prelude {
+    pub use crate::osstr::*;
+    pub use crate::sys::prelude::*;
+    pub use crate::*;
+    pub use alloc::borrow::ToOwned;
+    pub use alloc::boxed::Box;
+    pub use alloc::collections::btree_map::BTreeMap;
+    pub use alloc::format;
+    pub use alloc::rc::Rc;
+    pub use alloc::string::String;
+    pub use alloc::string::ToString;
+    pub use alloc::sync::{Arc, Weak};
+    pub use alloc::vec::Vec;
 }

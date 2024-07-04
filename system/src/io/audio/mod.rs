@@ -1,20 +1,15 @@
 //! Audio API
 
-use crate::{
-    sync::Mutex,
-    task::scheduler::{Priority, SpawnOption, Timer},
-    *,
-};
+use crate::sync::Mutex;
+use crate::task::scheduler::{Priority, SpawnOption, Timer};
+use crate::*;
 use alloc::slice;
-use core::{
-    f64::consts::TAU,
-    mem::transmute,
-    mem::MaybeUninit,
-    num::NonZeroUsize,
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Duration,
-};
-use megstd::{Arc, BTreeMap, Box, Vec, Weak};
+use core::f64::consts::TAU;
+use core::mem::transmute;
+use core::mem::MaybeUninit;
+use core::num::NonZeroUsize;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::time::Duration;
 
 pub type FreqType = f64;
 pub type SampleType = f64;
@@ -41,7 +36,9 @@ impl AudioManager {
 
         AUDIO_MANAGER = MaybeUninit::new(AudioManager::new());
 
-        SpawnOption::with_priority(Priority::High).start(Self::_audio_thread, 0, "Audio Manager");
+        SpawnOption::with_priority(Priority::High)
+            .start(Self::_audio_thread, 0, "Audio Manager")
+            .unwrap();
     }
 
     #[inline]
@@ -91,7 +88,7 @@ impl AudioManager {
 
     #[inline]
     pub fn reinterpret_i16(src: SampleType) -> i16 {
-        (src * i16::MAX as SampleType) as i16
+        (src * i16::MAX as SampleType).clamp(i16::MIN as SampleType, i16::MAX as SampleType) as i16
     }
 
     #[inline]

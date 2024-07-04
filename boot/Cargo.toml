@@ -1,4 +1,5 @@
 [workspace]
+resolver = "2"
 members = [
   "boot-efi",
 ]
@@ -6,3 +7,8 @@ members = [
 [profile.release]
 # lto = true
 opt-level = "z"
+
+[workspace.dependencies]
+uefi = { version="0.29.0", features = ['global_allocator']}
+uefi-services = { version="0.25.0", default-features = false}
+uefi-raw = {version="0.6.0"}

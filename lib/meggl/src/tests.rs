@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn components() {
-    let rgb = ARGB8888(0x12345678);
+    let rgb = ARGB8888::from_argb(0x12345678);
     let components = rgb.components();
 
-    assert_eq!(rgb.components().a, Alpha8(0x12));
+    assert_eq!(rgb.components().a, Alpha8::new(0x12));
     assert_eq!(rgb.components().r, 0x34);
     assert_eq!(rgb.components().g, 0x56);
     assert_eq!(rgb.components().b, 0x78);

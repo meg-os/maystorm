@@ -1,8 +1,8 @@
-use crate::{fs::*, *};
-use ab_glyph::{self, Font as AbFont};
-use alloc::collections::BTreeMap;
+use crate::fs::*;
+use crate::*;
+use ab_glyph::Font as AbFont;
 use core::{cell::UnsafeCell, mem::MaybeUninit};
-use megstd::{drawing::*, io::Read, Arc, Vec};
+use megstd::{drawing::*, io::Read, prelude::*};
 
 #[allow(dead_code)]
 mod embedded {
@@ -148,52 +148,52 @@ pub enum FontFamily {
 #[derive(Clone)]
 pub struct FontDescriptor {
     driver: Arc<dyn FontDriver>,
-    point: i32,
-    line_height: i32,
-    em_width: i32,
+    point: u32,
+    line_height: u32,
+    em_width: u32,
 }
 
 impl FontDescriptor {
-    pub fn new(family: FontFamily, point: isize) -> Option<Self> {
+    pub fn new(family: FontFamily, point: u32) -> Option<Self> {
         FontManager::driver_for(family).map(|driver| {
             if driver.is_scalable() {
                 Self {
                     driver: driver.clone(),
-                    point: point as i32,
+                    point,
                     line_height: ((driver.preferred_line_height() * point
                         + driver.base_height() / 2)
-                        / driver.base_height()) as i32,
+                        / driver.base_height()),
                     em_width: ((driver.width_of('M') * point + driver.base_height() / 2)
-                        / driver.base_height()) as i32,
+                        / driver.base_height()),
                 }
             } else {
                 Self {
                     driver: driver.clone(),
-                    point: driver.base_height() as i32,
-                    line_height: driver.preferred_line_height() as i32,
-                    em_width: driver.width_of('M') as i32,
+                    point: driver.base_height(),
+                    line_height: driver.preferred_line_height(),
+                    em_width: driver.width_of('M'),
                 }
             }
         })
     }
 
     #[inline]
-    pub const fn point(&self) -> isize {
-        self.point as isize
+    pub const fn point(&self) -> u32 {
+        self.point as u32
     }
 
     #[inline]
-    pub const fn line_height(&self) -> isize {
-        self.line_height as isize
+    pub const fn line_height(&self) -> u32 {
+        self.line_height as u32
     }
 
     #[inline]
-    pub const fn em_width(&self) -> isize {
-        self.em_width as isize
+    pub const fn em_width(&self) -> u32 {
+        self.em_width as u32
     }
 
     #[inline]
-    pub fn width_of(&self, character: char) -> isize {
+    pub fn width_of(&self, character: char) -> u32 {
         if self.point() == self.driver.base_height() {
             self.driver.width_of(character)
         } else {
@@ -203,12 +203,13 @@ impl FontDescriptor {
     }
 
     #[inline]
-    pub fn kern(&self, first: char, second: char) -> isize {
+    pub fn kern(&self, first: char, second: char) -> i32 {
         if self.point() == self.driver.base_height() {
             self.driver.kern(first, second)
         } else {
-            (self.driver.kern(first, second) * self.point() + self.driver.base_height() / 2)
-                / self.driver.base_height()
+            (self.driver.kern(first, second) * self.point() as i32
+                + self.driver.base_height() as i32 / 2)
+                / self.driver.base_height() as i32
         }
     }
 
@@ -233,20 +234,20 @@ impl FontDescriptor {
 pub trait FontDriver {
     fn is_scalable(&self) -> bool;
 
-    fn base_height(&self) -> isize;
+    fn base_height(&self) -> u32;
 
-    fn preferred_line_height(&self) -> isize;
+    fn preferred_line_height(&self) -> u32;
 
-    fn width_of(&self, character: char) -> isize;
+    fn width_of(&self, character: char) -> u32;
 
-    fn kern(&self, first: char, second: char) -> isize;
+    fn kern(&self, first: char, second: char) -> i32;
 
     fn draw_char(
         &self,
         character: char,
         bitmap: &mut BitmapRefMut,
         origin: Point,
-        height: isize,
+        height: u32,
         color: Color,
     );
 }
@@ -254,17 +255,15 @@ pub trait FontDriver {
 pub struct FixedFontDriver<'a> {
     size: Size,
     data: &'a [u8],
-    offset: Movement,
-    line_height: isize,
+    offset: Point,
+    line_height: u32,
     stride: usize,
 }
 
 impl FixedFontDriver<'_> {
-    pub const fn new(width: usize, height: usize, data: &'static [u8]) -> FixedFontDriver<'static> {
-        let width = width as isize;
-        let height = height as isize;
+    pub const fn new(width: u32, height: u32, data: &'static [u8]) -> FixedFontDriver<'static> {
         let line_height = height * 5 / 4;
-        let offset = Movement::new(0, (line_height - height) / 2);
+        let offset = Point::new(0, (line_height as i32 - height as i32) / 2);
         let stride = ((width as usize + 7) >> 3) * height as usize;
         FixedFontDriver {
             size: Size::new(width, height),
@@ -276,12 +275,12 @@ impl FixedFontDriver<'_> {
     }
 
     #[inline]
-    pub const fn width(&self) -> isize {
+    pub const fn width(&self) -> u32 {
         self.size.width
     }
 
     #[inline]
-    pub const fn line_height(&self) -> isize {
+    pub const fn line_height(&self) -> u32 {
         self.line_height
     }
 
@@ -319,21 +318,21 @@ impl FontDriver for FixedFontDriver<'_> {
     }
 
     #[inline]
-    fn base_height(&self) -> isize {
+    fn base_height(&self) -> u32 {
         self.size.height
     }
 
     #[inline]
-    fn preferred_line_height(&self) -> isize {
+    fn preferred_line_height(&self) -> u32 {
         self.line_height
     }
 
     #[inline]
-    fn width_of(&self, _character: char) -> isize {
+    fn width_of(&self, _character: char) -> u32 {
         self.size.width
     }
 
-    fn kern(&self, _first: char, _second: char) -> isize {
+    fn kern(&self, _first: char, _second: char) -> i32 {
         0
     }
 
@@ -342,7 +341,7 @@ impl FontDriver for FixedFontDriver<'_> {
         character: char,
         bitmap: &mut BitmapRefMut,
         origin: Point,
-        _height: isize,
+        _height: u32,
         color: Color,
     ) {
         self.draw_glyph(character, origin, |glyph, size, origin| {
@@ -353,22 +352,22 @@ impl FontDriver for FixedFontDriver<'_> {
 
 pub struct TrueTypeFont {
     font: ab_glyph::FontVec,
-    line_height: isize,
+    line_height: u32,
     units_per_em: f32,
 }
 
 impl TrueTypeFont {
-    const BASE_HEIGHT: isize = 256;
+    const BASE_HEIGHT: u32 = 256;
 
     #[inline]
     pub fn new(font_data: Vec<u8>) -> Option<Self> {
         let Ok(font) = ab_glyph::FontVec::try_from_vec(font_data) else {
-            return None
+            return None;
         };
         let units_per_em = font.units_per_em().unwrap();
         let line_height = (Self::BASE_HEIGHT as f32
             * (font.ascent_unscaled() - font.descent_unscaled() + font.line_gap_unscaled())
-            / units_per_em) as isize;
+            / units_per_em) as u32;
 
         Some(Self {
             font,
@@ -383,26 +382,26 @@ impl FontDriver for TrueTypeFont {
         true
     }
 
-    fn base_height(&self) -> isize {
+    fn base_height(&self) -> u32 {
         Self::BASE_HEIGHT
     }
 
-    fn preferred_line_height(&self) -> isize {
+    fn preferred_line_height(&self) -> u32 {
         self.line_height
     }
 
-    fn width_of(&self, character: char) -> isize {
+    fn width_of(&self, character: char) -> u32 {
         let glyph_id = self.font.glyph_id(character);
         (self.font.h_advance_unscaled(glyph_id) * Self::BASE_HEIGHT as f32 / self.units_per_em)
-            as isize
+            as u32
     }
 
-    fn kern(&self, first: char, second: char) -> isize {
+    fn kern(&self, first: char, second: char) -> i32 {
         (self
             .font
             .kern_unscaled(self.font.glyph_id(first), self.font.glyph_id(second))
             * Self::BASE_HEIGHT as f32
-            / self.units_per_em) as isize
+            / self.units_per_em) as i32
     }
 
     fn draw_char(
@@ -410,29 +409,27 @@ impl FontDriver for TrueTypeFont {
         character: char,
         bitmap: &mut BitmapRefMut,
         origin: Point,
-        height: isize,
+        height: u32,
         color: Color,
     ) {
-        let BitmapRefMut::Argb32(bitmap) = bitmap else { return };
+        let BitmapRefMut::Argb32(bitmap) = bitmap else {
+            return;
+        };
 
         let scale = height as f32 * self.font.height_unscaled() / self.units_per_em;
-        let ascent = (height as f32 * self.font.ascent_unscaled() / self.units_per_em) as isize;
+        let ascent = (height as f32 * self.font.ascent_unscaled() / self.units_per_em) as i32;
         // let descent = (height as f32 * self.font.descent_unscaled() / self.units_per_em) as isize;
         let glyph = self.font.glyph_id(character).with_scale(scale);
         self.font.outline_glyph(glyph).map(|glyph| {
             let bounds = glyph.px_bounds();
 
-            let origin =
-                origin + Movement::new(bounds.min.x as isize, ascent + bounds.min.y as isize);
+            let origin = origin + Point::new(bounds.min.x as i32, ascent + bounds.min.y as i32);
             let color = color.into_true_color();
             glyph.draw(|x, y, a| {
-                let point = origin + Movement::new(x as isize, y as isize);
-                if let Some(b) = bitmap.get_pixel(point) {
-                    unsafe {
-                        bitmap
-                            .set_pixel_unchecked(point, b.blend_draw(color.with_opacity(a.into())));
-                    }
-                }
+                let point = origin + Point::new(x as i32, y as i32);
+                bitmap
+                    .get_pixel_mut(point)
+                    .map(|v| v.blend(color.with_opacity(a.into())));
             })
         });
     }

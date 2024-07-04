@@ -35,7 +35,7 @@ impl Madt {
     }
 
     #[inline]
-    pub fn entries<T: RawEntry>(&self) -> impl Iterator<Item = &T> {
+    pub fn entries<'a, T: RawEntry + 'a>(&'a self) -> impl Iterator<Item = &'a T> {
         self.raw_entries().filter_map(|v| v.assume())
     }
 
@@ -44,8 +44,14 @@ impl Madt {
         self.raw_entries().map(|v| MadtEntry::from_raw(v))
     }
 
+    #[inline]
     pub fn local_apics(&self) -> impl Iterator<Item = &LocalApic> {
         self.entries::<LocalApic>().filter(|v| v.is_available())
+    }
+
+    #[inline]
+    pub fn local_x2apics(&self) -> impl Iterator<Item = &LocalX2Apic> {
+        self.entries::<LocalX2Apic>().filter(|v| v.is_available())
     }
 }
 
@@ -167,6 +173,8 @@ pub enum MadtEntry<'a> {
     IoApic(&'a IoApic),
     /// Interrupt Source Override
     InterruptSourceOverride(&'a InterruptSourceOverride),
+    /// Processor Local x2APIC
+    LocalX2Apic(&'a LocalX2Apic),
 
     Other(&'a EntryHeader),
 }
@@ -179,6 +187,8 @@ impl<'a> MadtEntry<'a> {
             Self::IoApic(ioapic)
         } else if let Some(iso) = raw.assume::<InterruptSourceOverride>() {
             Self::InterruptSourceOverride(iso)
+        } else if let Some(lapic) = raw.assume::<LocalX2Apic>() {
+            Self::LocalX2Apic(lapic)
         } else {
             Self::Other(raw)
         }
@@ -309,5 +319,49 @@ impl InterruptSourceOverride {
     #[inline]
     pub const fn flags(&self) -> u16 {
         self.flags
+    }
+}
+
+/// Processor Local x2APIC Structure
+#[repr(C, packed)]
+pub struct LocalX2Apic {
+    _hdr: EntryHeader,
+    _reserved: [u8; 2],
+    apic_id: u32,
+    flags: u32,
+    uid: u32,
+}
+
+unsafe impl RawEntry for LocalX2Apic {
+    const ENTRY_TYPE: EntryType = EntryType::LocalX2Apic;
+}
+
+impl LocalX2Apic {
+    #[inline]
+    pub const fn uid(&self) -> u32 {
+        self.uid
+    }
+
+    #[inline]
+    pub const fn apic_id(&self) -> u32 {
+        self.apic_id
+    }
+
+    #[inline]
+    pub const fn flags(&self) -> u32 {
+        self.flags
+    }
+
+    #[inline]
+    pub const fn status(&self) -> ApicStatus {
+        unsafe { transmute(self.flags & 0x0000_0003) }
+    }
+
+    #[inline]
+    pub const fn is_available(&self) -> bool {
+        match self.status() {
+            ApicStatus::Enabled => true,
+            _ => false,
+        }
     }
 }

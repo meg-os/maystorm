@@ -1,24 +1,24 @@
 //! Advanced Programmable Interrupt Controller
 
-use super::{cpu::*, hpet::*, page::PageManager};
-use crate::{
-    mem::mmio::*,
-    mem::*,
-    sync::{semaphore::BinarySemaphore, spinlock::SpinMutex},
-    system::*,
-    task::scheduler::*,
-    *,
-};
-use ::alloc::vec::Vec;
-use core::{
-    cell::UnsafeCell,
-    mem::{size_of, transmute, ManuallyDrop},
-    ptr::{copy_nonoverlapping, null_mut},
-    sync::atomic::*,
-    time::Duration,
-};
+use super::cpu::*;
+use super::hpet::*;
+use super::page::PageManager;
+use crate::mem::mmio::*;
+use crate::mem::*;
+use crate::sync::{semaphore::BinarySemaphore, spinlock::SpinMutex};
+use crate::system::*;
+use crate::task::scheduler::*;
+use crate::*;
+use core::cell::UnsafeCell;
+use core::mem::{size_of, transmute, ManuallyDrop};
+use core::ptr::{copy_nonoverlapping, null_mut};
+use core::sync::atomic::*;
+use core::time::Duration;
 use myacpi::madt;
 use seq_macro::seq;
+use x86::msr::MSR;
+use x86::prot::InterruptVector;
+use x86::prot::DPL0;
 
 pub type AffinityBits = usize;
 pub type AtomicAffinityBits = AtomicUsize;
@@ -36,6 +36,10 @@ const MAX_MSI: isize = 16;
 
 #[allow(dead_code)]
 const MAX_IRQ: usize = MAX_IOAPIC_IRQS + MAX_MSI as usize;
+
+pub const IPI_INVALIDATE_TLB: InterruptVector = InterruptVector(0xEE);
+
+pub const IPI_SCHEDULE: InterruptVector = InterruptVector(0xFC);
 
 static mut APIC: UnsafeCell<Apic> = UnsafeCell::new(Apic::new());
 
@@ -153,7 +157,7 @@ impl Apic {
             InterruptDescriptorTable::register(
                 Irq(N).into(),
                 handle_irq_~N as usize,
-                super::cpu::PrivilegeLevel::Kernel,
+                DPL0,
             );
         });
 
@@ -179,11 +183,7 @@ impl Apic {
         } else {
             panic!("No Reference Timer found");
         }
-        InterruptDescriptorTable::register(
-            vec_latimer,
-            timer_handler as usize,
-            PrivilegeLevel::Kernel,
-        );
+        InterruptDescriptorTable::register(vec_latimer, timer_handler as usize, DPL0);
         LocalApic::set_timer(
             LocalApicTimerMode::Periodic,
             vec_latimer,
@@ -191,16 +191,12 @@ impl Apic {
         );
 
         InterruptDescriptorTable::register(
-            InterruptVector::IPI_INVALIDATE_TLB,
+            IPI_INVALIDATE_TLB,
             ipi_tlb_flush_handler as usize,
-            PrivilegeLevel::Kernel,
+            DPL0,
         );
 
-        InterruptDescriptorTable::register(
-            InterruptVector::IPI_SCHEDULE,
-            ipi_schedule_handler as usize,
-            PrivilegeLevel::Kernel,
-        );
+        InterruptDescriptorTable::register(IPI_SCHEDULE, ipi_schedule_handler as usize, DPL0);
 
         // Start SMP
         let sipi_vec = InterruptVector(MemoryManager::static_alloc_real().unwrap().get());
@@ -363,7 +359,7 @@ impl Apic {
                     Ordering::SeqCst,
                 );
 
-                LocalApic::broadcast_ipi(InterruptVector::IPI_INVALIDATE_TLB);
+                LocalApic::broadcast_ipi(IPI_INVALIDATE_TLB);
 
                 let mut hint = Hal::cpu().spin_wait();
                 let deadline = Timer::new(Duration::from_millis(200));
@@ -384,7 +380,7 @@ impl Apic {
 
     #[inline]
     pub fn broadcast_reschedule() {
-        LocalApic::broadcast_ipi(InterruptVector::IPI_SCHEDULE);
+        LocalApic::broadcast_ipi(IPI_SCHEDULE);
     }
 
     #[inline]
@@ -393,7 +389,7 @@ impl Apic {
         match shared.idt[irq.0 as usize] {
             0 => {
                 let _ = irq.disable();
-                panic!("IRQ {} is Enabled, But not Installed", irq.0);
+                panic!("IRQ {}: Unconfigured IRQ interrupt has occurred", irq.0);
             }
             entry => {
                 let f: IrqHandler = transmute(entry);
@@ -645,8 +641,9 @@ enum LocalApic {
 }
 
 impl LocalApic {
-    const IA32_APIC_BASE_MSR_BSP: u64 = 0x00000100;
-    const IA32_APIC_BASE_MSR_ENABLE: u64 = 0x00000800;
+    pub const IA32_APIC_BASE_MSR_BSP: u64 = 1 << 8;
+    // pub const IA32_APIC_BASE_MSR_EXTD: u64 = 1 << 10;
+    pub const IA32_APIC_BASE_MSR_EN: u64 = 1 << 11;
 
     #[inline]
     unsafe fn init(base: PhysicalAddress) {
@@ -656,13 +653,13 @@ impl LocalApic {
         LOCAL_APIC = MmioSlice::from_phys(base, 0x1000).map(|v| UnsafeCell::new(v));
 
         MSR::IA32_APIC_BASE
-            .write(base.as_u64() | Self::IA32_APIC_BASE_MSR_ENABLE | Self::IA32_APIC_BASE_MSR_BSP);
+            .write(base.as_u64() | Self::IA32_APIC_BASE_MSR_EN | Self::IA32_APIC_BASE_MSR_BSP);
     }
 
     unsafe fn init_ap() -> ApicId {
         let shared = Apic::shared();
         MSR::IA32_APIC_BASE
-            .write(LOCAL_APIC_PA.load(Ordering::Relaxed) | Self::IA32_APIC_BASE_MSR_ENABLE);
+            .write(LOCAL_APIC_PA.load(Ordering::Relaxed) | Self::IA32_APIC_BASE_MSR_EN);
 
         let apicid = LocalApic::current_processor_id();
 

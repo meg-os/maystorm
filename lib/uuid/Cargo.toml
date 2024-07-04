@@ -1,0 +1,10 @@
+[package]
+authors = ["Nerry <108566+neri@users.noreply.github.com>"]
+name = "uuid"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+uuid_identify = { path = "./identify"}

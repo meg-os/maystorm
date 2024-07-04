@@ -1,9 +1,6 @@
 use crate::fs::{devfs::*, *};
-use alloc::borrow::ToOwned;
-use megstd::{
-    io::{ErrorKind, Result},
-    Arc, String,
-};
+use crate::*;
+use megstd::io::{ErrorKind, Result};
 
 /// Storage Full Device `/dev/full`
 pub struct Full;

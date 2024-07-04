@@ -16,11 +16,7 @@ pub struct Window {
 impl Window {
     #[inline]
     pub fn new(title: &str, size: Size) -> Self {
-        let handle = WindowHandle(syscall::os_new_window1(
-            title,
-            size.width as usize,
-            size.height as usize,
-        ));
+        let handle = WindowHandle(syscall::os_new_window1(title, size.width, size.height));
         Self { handle }
     }
 
@@ -35,6 +31,7 @@ impl Window {
     }
 
     #[inline]
+    #[must_use]
     pub fn begin_draw(&self) -> DrawingContext {
         unsafe { DrawingContext::from_raw(syscall::os_begin_draw(self.handle.0)) }
     }
@@ -45,7 +42,9 @@ impl Window {
         F: FnOnce(&mut DrawingContext) -> R,
     {
         let mut context = self.begin_draw();
-        f(&mut context)
+        let result = f(&mut context);
+        drop(context);
+        result
     }
 
     #[inline]
@@ -59,6 +58,11 @@ impl Window {
             megos::OPTION_CHAR_NONE => None,
             c => Some(unsafe { core::char::from_u32_unchecked(c as u32) }),
         }
+    }
+
+    #[inline]
+    pub fn set_max_fps(&self, fps: usize) {
+        syscall::os_window_max_fps(self.handle.0, fps);
     }
 }
 
@@ -79,36 +83,23 @@ impl DrawingContext {
 
     #[inline]
     pub fn draw_string(&mut self, s: &str, origin: Point, color: WindowColor) {
-        syscall::os_win_draw_string(
-            self.ctx,
-            origin.x as usize,
-            origin.y as usize,
-            s,
-            color.0 as usize,
-        );
+        syscall::os_win_draw_string(self.ctx, origin.x, origin.y, s, color.into_raw());
     }
 
     #[inline]
     pub fn draw_line(&mut self, c1: Point, c2: Point, color: WindowColor) {
-        syscall::os_win_draw_line(
-            self.ctx,
-            c1.x as usize,
-            c1.y as usize,
-            c2.x as usize,
-            c2.y as usize,
-            color.0 as usize,
-        )
+        syscall::os_win_draw_line(self.ctx, c1.x, c1.y, c2.x, c2.y, color.into_raw())
     }
 
     #[inline]
     pub fn fill_rect(&mut self, rect: Rect, color: WindowColor) {
         syscall::os_win_fill_rect(
             self.ctx,
-            rect.min_x() as usize,
-            rect.min_y() as usize,
-            rect.width() as usize,
-            rect.height() as usize,
-            color.0 as usize,
+            rect.min_x(),
+            rect.min_y(),
+            rect.width(),
+            rect.height(),
+            color.into_raw(),
         )
     }
 
@@ -122,15 +113,15 @@ impl DrawingContext {
     ) {
         let params = OsDrawShape {
             radius: radius as u32,
-            bg_color: bg_color.0,
-            border_color: border_color.0,
+            bg_color: bg_color.into_raw(),
+            border_color: border_color.into_raw(),
         };
         syscall::os_draw_shape(
             self.ctx,
-            rect.min_x() as usize,
-            rect.min_y() as usize,
-            rect.width() as usize,
-            rect.height() as usize,
+            rect.min_x(),
+            rect.min_y(),
+            rect.width(),
+            rect.height(),
             &params,
         );
     }
@@ -145,31 +136,45 @@ impl DrawingContext {
     ) {
         syscall::os_blt1(
             self.ctx,
-            origin.x as usize,
-            origin.y as usize,
+            origin.x,
+            origin.y,
             bitmap as *const _ as usize,
-            color.0 as u32,
+            color.into_raw(),
             mode,
         );
     }
 
     #[inline]
     pub fn blt8<'a, T: AsRef<BitmapRef8<'a>>>(&mut self, bitmap: &T, origin: Point) {
-        syscall::os_blt8(
+        syscall::os_blt8(self.ctx, origin.x, origin.y, bitmap as *const _ as usize)
+    }
+
+    #[inline]
+    pub fn blt8_sub<'a, T: AsRef<BitmapRef8<'a>>>(&mut self, bitmap: &T, rect: Rect) {
+        syscall::os_blt8_sub(
             self.ctx,
-            origin.x as usize,
-            origin.y as usize,
+            rect.min_x(),
+            rect.min_y(),
             bitmap as *const _ as usize,
+            rect.width(),
+            rect.height(),
         )
     }
 
     #[inline]
     pub fn blt32<'a, T: AsRef<BitmapRef32<'a>>>(&mut self, bitmap: &T, origin: Point) {
-        syscall::os_blt32(
+        syscall::os_blt32(self.ctx, origin.x, origin.y, bitmap as *const _ as usize)
+    }
+
+    #[inline]
+    pub fn blt32_sub<'a, T: AsRef<BitmapRef32<'a>>>(&mut self, bitmap: &T, rect: Rect) {
+        syscall::os_blt32_sub(
             self.ctx,
-            origin.x as usize,
-            origin.y as usize,
+            rect.min_x(),
+            rect.min_y(),
             bitmap as *const _ as usize,
+            rect.width(),
+            rect.height(),
         )
     }
 }
@@ -185,6 +190,7 @@ pub struct WindowBuilder {
     size: Size,
     bg_color: WindowColor,
     options: u32,
+    max_fps: usize,
 }
 
 impl WindowBuilder {
@@ -194,6 +200,7 @@ impl WindowBuilder {
             size: Size::new(300, 400),
             bg_color: WindowColor::WHITE,
             options: 0,
+            max_fps: 0,
         }
     }
 
@@ -202,11 +209,14 @@ impl WindowBuilder {
     pub fn build(self, title: &str) -> Window {
         let handle = WindowHandle(syscall::os_new_window2(
             title,
-            self.size.width() as usize,
-            self.size.height() as usize,
-            self.bg_color.0 as usize,
+            self.size.width(),
+            self.size.height(),
+            self.bg_color.into_raw(),
             self.options as usize,
         ));
+        if self.max_fps > 0 {
+            syscall::os_window_max_fps(handle.0, self.max_fps);
+        }
         Window { handle }
     }
 
@@ -255,6 +265,12 @@ impl WindowBuilder {
     #[inline]
     pub const fn with_options(mut self, options: u32) -> Self {
         self.options = options;
+        self
+    }
+
+    #[inline]
+    pub const fn max_fps(mut self, fps: usize) -> Self {
+        self.max_fps = fps;
         self
     }
 }

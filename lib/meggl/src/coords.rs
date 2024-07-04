@@ -1,29 +1,12 @@
-use core::{convert::TryFrom, mem::swap, ops::*};
+use super::*;
+use crate::vec::Vec2;
+use core::mem::swap;
+use core::ops::*;
 pub use num_traits::Zero;
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub struct Point {
-    pub x: isize,
-    pub y: isize,
-}
+pub type Point = Vec2<GlSInt>;
 
 impl Point {
-    #[inline]
-    pub const fn new(x: isize, y: isize) -> Self {
-        Self { x, y }
-    }
-
-    #[inline]
-    pub const fn x(&self) -> isize {
-        self.x
-    }
-
-    #[inline]
-    pub const fn y(&self) -> isize {
-        self.y
-    }
-
     #[inline]
     pub fn swap(&mut self) {
         swap(&mut self.x, &mut self.y);
@@ -32,8 +15,8 @@ impl Point {
     #[inline]
     pub const fn swapped(&self) -> Self {
         Self {
-            x: self.y,
-            y: self.x,
+            x: self.y(),
+            y: self.x(),
         }
     }
 
@@ -83,15 +66,36 @@ impl Point {
 
     #[inline]
     pub fn distance2(&self, other: Point) -> Distance2 {
-        self.sub(other).distance2()
+        let movement = self.sub(other);
+        Distance2((movement.x * movement.x + movement.y * movement.y) as usize)
     }
 }
 
-impl Add<isize> for Point {
+impl From<Vec2<GlFloat>> for Point {
+    #[inline]
+    fn from(value: Vec2<GlFloat>) -> Self {
+        Self {
+            x: value.x as GlSInt,
+            y: value.y as GlSInt,
+        }
+    }
+}
+
+impl From<Point> for Vec2<GlFloat> {
+    #[inline]
+    fn from(value: Point) -> Self {
+        Self {
+            x: value.x as GlFloat,
+            y: value.y as GlFloat,
+        }
+    }
+}
+
+impl Add<GlSInt> for Point {
     type Output = Self;
 
     #[inline]
-    fn add(self, rhs: isize) -> Self {
+    fn add(self, rhs: GlSInt) -> Self {
         Point {
             x: self.x + rhs,
             y: self.y + rhs,
@@ -99,18 +103,18 @@ impl Add<isize> for Point {
     }
 }
 
-impl AddAssign<isize> for Point {
+impl AddAssign<GlSInt> for Point {
     #[inline]
-    fn add_assign(&mut self, rhs: isize) {
+    fn add_assign(&mut self, rhs: GlSInt) {
         *self = self.add(rhs);
     }
 }
 
-impl Sub<isize> for Point {
+impl Sub<GlSInt> for Point {
     type Output = Self;
 
     #[inline]
-    fn sub(self, rhs: isize) -> Self {
+    fn sub(self, rhs: GlSInt) -> Self {
         Point {
             x: self.x - rhs,
             y: self.y - rhs,
@@ -118,133 +122,17 @@ impl Sub<isize> for Point {
     }
 }
 
-impl SubAssign<isize> for Point {
+impl SubAssign<GlSInt> for Point {
     #[inline]
-    fn sub_assign(&mut self, rhs: isize) {
+    fn sub_assign(&mut self, rhs: GlSInt) {
         *self = self.sub(rhs);
     }
 }
 
-impl Sub<Self> for Point {
-    type Output = Movement;
-
-    #[inline]
-    fn sub(self, rhs: Self) -> Movement {
-        Movement {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub struct Movement {
-    pub x: isize,
-    pub y: isize,
-}
-
-impl Movement {
-    #[inline]
-    pub const fn new(x: isize, y: isize) -> Self {
-        Self { x, y }
-    }
-
-    #[inline]
-    pub const fn x(&self) -> isize {
-        self.x
-    }
-
-    #[inline]
-    pub const fn y(&self) -> isize {
-        self.y
-    }
-
-    #[inline]
-    pub fn swap(&mut self) {
-        swap(&mut self.x, &mut self.y);
-    }
-
-    #[inline]
-    pub const fn swapped(&self) -> Self {
-        Self {
-            x: self.y,
-            y: self.x,
-        }
-    }
-
-    #[inline]
-    pub const fn distance2(&self) -> Distance2 {
-        Distance2((self.x * self.x + self.y * self.y) as usize)
-    }
-}
-
-impl Zero for Movement {
-    #[inline]
-    fn zero() -> Self {
-        Self { x: 0, y: 0 }
-    }
-
-    #[inline]
-    fn is_zero(&self) -> bool {
-        self.x == 0 && self.y == 0
-    }
-}
-
-impl From<Point> for Movement {
-    #[inline]
-    fn from(v: Point) -> Self {
-        Self { x: v.x, y: v.y }
-    }
-}
-
-impl From<Movement> for Point {
-    #[inline]
-    fn from(v: Movement) -> Self {
-        Self { x: v.x, y: v.y }
-    }
-}
-
-impl Add<Self> for Movement {
+impl Add<Point> for Rect {
     type Output = Self;
     #[inline]
-    fn add(self, rhs: Movement) -> Self {
-        Self {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-
-impl AddAssign<Self> for Movement {
-    #[inline]
-    fn add_assign(&mut self, rhs: Self) {
-        *self = self.add(rhs);
-    }
-}
-
-impl Add<Movement> for Point {
-    type Output = Self;
-    #[inline]
-    fn add(self, rhs: Movement) -> Self::Output {
-        Point {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-        }
-    }
-}
-
-impl AddAssign<Movement> for Point {
-    #[inline]
-    fn add_assign(&mut self, rhs: Movement) {
-        *self = self.add(rhs);
-    }
-}
-
-impl Add<Movement> for Rect {
-    type Output = Self;
-    #[inline]
-    fn add(self, rhs: Movement) -> Self::Output {
+    fn add(self, rhs: Point) -> Self::Output {
         Rect {
             origin: Point {
                 x: self.origin.x + rhs.x,
@@ -255,53 +143,17 @@ impl Add<Movement> for Rect {
     }
 }
 
-impl AddAssign<Movement> for Rect {
+impl AddAssign<Point> for Rect {
     #[inline]
-    fn add_assign(&mut self, rhs: Movement) {
+    fn add_assign(&mut self, rhs: Point) {
         *self = self.add(rhs);
     }
 }
 
-impl Sub<Self> for Movement {
+impl Sub<Point> for Rect {
     type Output = Self;
     #[inline]
-    fn sub(self, rhs: Self) -> Self {
-        Self {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-impl SubAssign<Self> for Movement {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Self) {
-        *self = self.sub(rhs);
-    }
-}
-
-impl Sub<Movement> for Point {
-    type Output = Self;
-    #[inline]
-    fn sub(self, rhs: Movement) -> Self::Output {
-        Point {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-        }
-    }
-}
-
-impl SubAssign<Movement> for Point {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Movement) {
-        *self = self.sub(rhs);
-    }
-}
-
-impl Sub<Movement> for Rect {
-    type Output = Self;
-    #[inline]
-    fn sub(self, rhs: Movement) -> Self::Output {
+    fn sub(self, rhs: Point) -> Self::Output {
         Rect {
             origin: Point {
                 x: self.origin.x - rhs.x,
@@ -312,9 +164,9 @@ impl Sub<Movement> for Rect {
     }
 }
 
-impl SubAssign<Movement> for Rect {
+impl SubAssign<Point> for Rect {
     #[inline]
-    fn sub_assign(&mut self, rhs: Movement) {
+    fn sub_assign(&mut self, rhs: Point) {
         *self = self.sub(rhs);
     }
 }
@@ -331,34 +183,32 @@ impl Distance2 {
     }
 }
 
-impl From<Movement> for Distance2 {
-    #[inline]
-    fn from(v: Movement) -> Self {
-        v.distance2()
-    }
-}
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct Size {
-    pub width: isize,
-    pub height: isize,
+    pub width: GlUInt,
+    pub height: GlUInt,
 }
 
 impl Size {
     #[inline]
-    pub const fn new(width: isize, height: isize) -> Self {
+    pub const fn new(width: GlUInt, height: GlUInt) -> Self {
         Self { width, height }
     }
 
     #[inline]
-    pub const fn width(&self) -> isize {
+    pub const fn width(&self) -> GlUInt {
         self.width
     }
 
     #[inline]
-    pub const fn height(&self) -> isize {
+    pub const fn height(&self) -> GlUInt {
         self.height
+    }
+
+    #[inline]
+    pub const fn width_height_usize(&self) -> usize {
+        self.width as usize * self.height as usize
     }
 
     #[inline]
@@ -413,8 +263,8 @@ impl Add<EdgeInsets> for Size {
     #[inline]
     fn add(self, rhs: EdgeInsets) -> Self {
         Size {
-            width: self.width + rhs.left + rhs.right,
-            height: self.height + rhs.top + rhs.bottom,
+            width: ((self.width as GlSInt) + rhs.left + rhs.right) as GlUInt,
+            height: ((self.height as GlSInt) + rhs.top + rhs.bottom) as GlUInt,
         }
     }
 }
@@ -451,8 +301,8 @@ impl Sub<EdgeInsets> for Size {
     #[inline]
     fn sub(self, rhs: EdgeInsets) -> Self {
         Size {
-            width: self.width - (rhs.left + rhs.left),
-            height: self.height - (rhs.top + rhs.bottom),
+            width: ((self.width as GlSInt) - (rhs.left + rhs.left)) as GlUInt,
+            height: ((self.height as GlSInt) - (rhs.top + rhs.bottom)) as GlUInt,
         }
     }
 }
@@ -490,11 +340,11 @@ impl MulAssign<Self> for Size {
     }
 }
 
-impl Mul<isize> for Size {
+impl Mul<GlUInt> for Size {
     type Output = Self;
 
     #[inline]
-    fn mul(self, rhs: isize) -> Self::Output {
+    fn mul(self, rhs: GlUInt) -> Self::Output {
         Self {
             width: self.width * rhs,
             height: self.height * rhs,
@@ -502,37 +352,18 @@ impl Mul<isize> for Size {
     }
 }
 
-impl MulAssign<isize> for Size {
+impl MulAssign<GlUInt> for Size {
     #[inline]
-    fn mul_assign(&mut self, rhs: isize) {
+    fn mul_assign(&mut self, rhs: GlUInt) {
         *self = self.mul(rhs);
     }
 }
 
-impl Mul<usize> for Size {
+impl Div<GlUInt> for Size {
     type Output = Self;
 
     #[inline]
-    fn mul(self, rhs: usize) -> Self::Output {
-        Self {
-            width: self.width * rhs as isize,
-            height: self.height * rhs as isize,
-        }
-    }
-}
-
-impl MulAssign<usize> for Size {
-    #[inline]
-    fn mul_assign(&mut self, rhs: usize) {
-        *self = self.mul(rhs);
-    }
-}
-
-impl Div<isize> for Size {
-    type Output = Self;
-
-    #[inline]
-    fn div(self, rhs: isize) -> Self::Output {
+    fn div(self, rhs: GlUInt) -> Self::Output {
         Self {
             width: self.width / rhs,
             height: self.height / rhs,
@@ -540,28 +371,9 @@ impl Div<isize> for Size {
     }
 }
 
-impl DivAssign<isize> for Size {
+impl DivAssign<GlUInt> for Size {
     #[inline]
-    fn div_assign(&mut self, rhs: isize) {
-        *self = self.div(rhs);
-    }
-}
-
-impl Div<usize> for Size {
-    type Output = Self;
-
-    #[inline]
-    fn div(self, rhs: usize) -> Self::Output {
-        Self {
-            width: self.width / rhs as isize,
-            height: self.height / rhs as isize,
-        }
-    }
-}
-
-impl DivAssign<usize> for Size {
-    #[inline]
-    fn div_assign(&mut self, rhs: usize) {
+    fn div_assign(&mut self, rhs: GlUInt) {
         *self = self.div(rhs);
     }
 }
@@ -575,26 +387,20 @@ pub struct Rect {
 
 impl Rect {
     pub const VOID: Self = Self {
-        origin: Point::new(isize::MAX, isize::MAX),
+        origin: Point::new(GlSInt::MAX, GlSInt::MAX),
         size: Size::new(0, 0),
     };
 
     #[inline]
-    pub const fn new(x: isize, y: isize, width: isize, height: isize) -> Self {
+    pub const fn new(x: GlSInt, y: GlSInt, width: GlUInt, height: GlUInt) -> Self {
         Self {
-            origin: Point {
-                x: if width >= 0 { x } else { x + width },
-                y: if height >= 0 { y } else { y + height },
-            },
-            size: Size {
-                width: abs(width),
-                height: abs(height),
-            },
+            origin: Point { x, y },
+            size: Size { width, height },
         }
     }
 
     #[inline]
-    pub const fn from_diagonal(c1: Point, c2: Point) -> Self {
+    pub fn from_diagonal(c1: Point, c2: Point) -> Self {
         Self::from_coordinates(Coordinates::from_diagonal(c1, c2))
     }
 
@@ -622,42 +428,42 @@ impl Rect {
     }
 
     #[inline]
-    pub const fn width(&self) -> isize {
+    pub const fn width(&self) -> GlUInt {
         self.size.width
     }
 
     #[inline]
-    pub const fn height(&self) -> isize {
+    pub const fn height(&self) -> GlUInt {
         self.size.height
     }
 
     #[inline]
-    pub const fn min_x(&self) -> isize {
+    pub const fn min_x(&self) -> GlSInt {
         self.origin.x
     }
 
     #[inline]
-    pub const fn max_x(&self) -> isize {
-        self.origin.x() + self.width()
+    pub const fn max_x(&self) -> GlSInt {
+        self.origin.x() + (self.width() as GlSInt)
     }
 
     #[inline]
-    pub const fn mid_x(&self) -> isize {
+    pub const fn mid_x(&self) -> GlSInt {
         (self.min_x() + self.max_x()) / 2
     }
 
     #[inline]
-    pub const fn min_y(&self) -> isize {
+    pub const fn min_y(&self) -> GlSInt {
         self.origin.y
     }
 
     #[inline]
-    pub const fn max_y(&self) -> isize {
-        self.origin.y() + self.height()
+    pub const fn max_y(&self) -> GlSInt {
+        self.origin.y() + (self.height() as GlSInt)
     }
 
     #[inline]
-    pub const fn mid_y(&self) -> isize {
+    pub const fn mid_y(&self) -> GlSInt {
         (self.min_y() + self.max_y()) / 2
     }
 
@@ -669,16 +475,20 @@ impl Rect {
                 y: self.origin.y + insets.top,
             },
             size: Size {
-                width: self.size.width - (insets.left + insets.right),
-                height: self.size.height - (insets.top + insets.bottom),
+                width: ((self.size.width as GlSInt) - (insets.left + insets.right)) as GlUInt,
+                height: ((self.size.height as GlSInt) - (insets.top + insets.bottom)) as GlUInt,
             },
         }
     }
 
     #[inline]
     pub const fn overlaps(self, rhs: Self) -> bool {
-        let Ok(cl) = Coordinates::from_rect(self) else { return false };
-        let Ok(cr) = Coordinates::from_rect(rhs) else { return false };
+        let Ok(cl) = Coordinates::from_rect(self) else {
+            return false;
+        };
+        let Ok(cr) = Coordinates::from_rect(rhs) else {
+            return false;
+        };
 
         cl.left < cr.right && cr.left < cl.right && cl.top < cr.bottom && cr.top < cl.bottom
     }
@@ -718,8 +528,12 @@ impl Contains<Point> for Rect {
 impl Contains<Rect> for Rect {
     #[inline]
     fn contains(&self, other: Rect) -> bool {
-        let Ok(cl) = Coordinates::from_rect(*self) else { return false };
-        let Ok(cr) = Coordinates::from_rect(other) else { return false };
+        let Ok(cl) = Coordinates::from_rect(*self) else {
+            return false;
+        };
+        let Ok(cr) = Coordinates::from_rect(other) else {
+            return false;
+        };
 
         cl.left <= cr.left && cl.right >= cr.right && cl.top <= cr.top && cl.bottom >= cr.bottom
     }
@@ -788,8 +602,8 @@ impl Add<EdgeInsets> for Rect {
                 y: self.origin.y - rhs.top,
             },
             size: Size {
-                width: self.size.width + (rhs.left + rhs.right),
-                height: self.size.height + (rhs.top + rhs.bottom),
+                width: ((self.size.width as GlSInt) + (rhs.left + rhs.right)) as GlUInt,
+                height: ((self.size.height as GlSInt) + (rhs.top + rhs.bottom)) as GlUInt,
             },
         }
     }
@@ -818,44 +632,23 @@ impl SubAssign<EdgeInsets> for Rect {
     }
 }
 
-impl Mul<isize> for Rect {
+impl Mul<GlUInt> for Rect {
     type Output = Self;
 
     #[inline]
-    fn mul(self, rhs: isize) -> Self::Output {
+    fn mul(self, rhs: GlUInt) -> Self::Output {
         Self::new(
-            self.origin.x() * rhs,
-            self.origin.y() * rhs,
+            self.origin.x() * rhs as GlSInt,
+            self.origin.y() * rhs as GlSInt,
             self.width() * rhs,
             self.height() * rhs,
         )
     }
 }
 
-impl MulAssign<isize> for Rect {
+impl MulAssign<GlUInt> for Rect {
     #[inline]
-    fn mul_assign(&mut self, rhs: isize) {
-        *self = self.mul(rhs);
-    }
-}
-
-impl Mul<usize> for Rect {
-    type Output = Self;
-
-    #[inline]
-    fn mul(self, rhs: usize) -> Self::Output {
-        Self::new(
-            self.origin.x() * rhs as isize,
-            self.origin.y() * rhs as isize,
-            self.width() * rhs as isize,
-            self.height() * rhs as isize,
-        )
-    }
-}
-
-impl MulAssign<usize> for Rect {
-    #[inline]
-    fn mul_assign(&mut self, rhs: usize) {
+    fn mul_assign(&mut self, rhs: GlUInt) {
         *self = self.mul(rhs);
     }
 }
@@ -863,17 +656,17 @@ impl MulAssign<usize> for Rect {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct Coordinates {
-    pub left: isize,
-    pub top: isize,
-    pub right: isize,
-    pub bottom: isize,
+    pub left: GlSInt,
+    pub top: GlSInt,
+    pub right: GlSInt,
+    pub bottom: GlSInt,
 }
 
 impl Coordinates {
-    pub const VOID: Self = Self::new(isize::MAX, isize::MAX, isize::MIN, isize::MIN);
+    pub const VOID: Self = Self::new(GlSInt::MAX, GlSInt::MAX, GlSInt::MIN, GlSInt::MIN);
 
     #[inline]
-    pub const fn new(left: isize, top: isize, right: isize, bottom: isize) -> Self {
+    pub const fn new(left: GlSInt, top: GlSInt, right: GlSInt, bottom: GlSInt) -> Self {
         Self {
             left,
             top,
@@ -888,16 +681,16 @@ impl Coordinates {
     }
 
     #[inline]
-    pub const fn from_diagonal(c1: Point, c2: Point) -> Self {
+    pub fn from_diagonal(c1: Point, c2: Point) -> Self {
         let a = c1.x();
         let b = c2.x();
-        let left = min(a, b);
-        let right = max(a, b);
+        let left = a.min(b);
+        let right = a.max(b);
 
         let a = c1.y();
         let b = c2.y();
-        let top = min(a, b);
-        let bottom = max(a, b);
+        let top = a.min(b);
+        let bottom = a.max(b);
 
         Self {
             left,
@@ -929,7 +722,10 @@ impl Coordinates {
 
     #[inline]
     pub const fn size(&self) -> Size {
-        Size::new(self.right - self.left, self.bottom - self.top)
+        Size::new(
+            (self.right - self.left) as GlUInt,
+            (self.bottom - self.top) as GlUInt,
+        )
     }
 
     #[inline]
@@ -939,12 +735,12 @@ impl Coordinates {
 
     #[inline]
     #[must_use]
-    pub const fn merged(&self, other: Self) -> Self {
+    pub fn merged(&self, other: Self) -> Self {
         Self {
-            left: min(self.left, other.left),
-            top: min(self.top, other.top),
-            right: max(self.right, other.right),
-            bottom: max(self.bottom, other.bottom),
+            left: self.left.min(other.left),
+            top: self.top.min(other.top),
+            right: self.right.max(other.right),
+            bottom: self.bottom.max(other.bottom),
         }
     }
 
@@ -955,12 +751,12 @@ impl Coordinates {
 
     #[inline]
     #[must_use]
-    pub const fn trimmed(&self, other: Self) -> Self {
+    pub fn trimmed(&self, other: Self) -> Self {
         Self {
-            left: max(self.left, other.left),
-            top: max(self.top, other.top),
-            right: min(self.right, other.right),
-            bottom: min(self.bottom, other.bottom),
+            left: self.left.max(other.left),
+            top: self.top.max(other.top),
+            right: self.right.min(other.right),
+            bottom: self.bottom.min(other.bottom),
         }
     }
 
@@ -970,18 +766,18 @@ impl Coordinates {
     }
 
     #[inline]
-    pub const fn from_size(size: Size) -> Self {
+    pub fn from_size(size: Size) -> Self {
         Self {
             left: 0,
             top: 0,
-            right: size.width(),
-            bottom: size.height(),
+            right: safe_to_int(size.width()),
+            bottom: safe_to_int(size.height()),
         }
     }
 
     #[inline]
     pub const fn from_rect(rect: Rect) -> Result<Coordinates, ()> {
-        if rect.size.width == 0 || rect.size.height == 0 {
+        if (rect.size.width as GlSInt) <= 0 || (rect.size.height as GlSInt) <= 0 {
             Err(())
         } else {
             Ok(unsafe { Self::from_rect_unchecked(rect) })
@@ -990,25 +786,10 @@ impl Coordinates {
 
     #[inline]
     pub const unsafe fn from_rect_unchecked(rect: Rect) -> Coordinates {
-        let left: isize;
-        let right: isize;
-        if rect.size.width > 0 {
-            left = rect.origin.x;
-            right = left + rect.size.width;
-        } else {
-            right = rect.origin.x;
-            left = right + rect.size.width;
-        }
-
-        let top: isize;
-        let bottom: isize;
-        if rect.size.height > 0 {
-            top = rect.origin.y;
-            bottom = top + rect.size.height;
-        } else {
-            bottom = rect.origin.y;
-            top = bottom + rect.size.height;
-        }
+        let left = rect.origin.x;
+        let right = left + rect.size.width as GlSInt;
+        let top = rect.origin.y;
+        let bottom = top + rect.size.height as GlSInt;
 
         Self {
             left,
@@ -1064,15 +845,15 @@ impl From<Size> for Coordinates {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct EdgeInsets {
-    pub top: isize,
-    pub left: isize,
-    pub bottom: isize,
-    pub right: isize,
+    pub top: GlSInt,
+    pub left: GlSInt,
+    pub bottom: GlSInt,
+    pub right: GlSInt,
 }
 
 impl EdgeInsets {
     #[inline]
-    pub const fn new(top: isize, left: isize, bottom: isize, right: isize) -> Self {
+    pub const fn new(top: GlSInt, left: GlSInt, bottom: GlSInt, right: GlSInt) -> Self {
         Self {
             top,
             left,
@@ -1082,7 +863,7 @@ impl EdgeInsets {
     }
 
     #[inline]
-    pub const fn padding_each(value: isize) -> Self {
+    pub const fn padding_each(value: GlSInt) -> Self {
         Self {
             top: value,
             left: value,
@@ -1148,32 +929,5 @@ impl SubAssign<Self> for EdgeInsets {
     #[inline]
     fn sub_assign(&mut self, rhs: Self) {
         *self = self.sub(rhs);
-    }
-}
-
-#[inline]
-const fn abs(val: isize) -> isize {
-    if val >= 0 {
-        val
-    } else {
-        0 - val
-    }
-}
-
-#[inline]
-const fn min(lhs: isize, rhs: isize) -> isize {
-    if lhs < rhs {
-        lhs
-    } else {
-        rhs
-    }
-}
-
-#[inline]
-const fn max(lhs: isize, rhs: isize) -> isize {
-    if lhs > rhs {
-        lhs
-    } else {
-        rhs
     }
 }

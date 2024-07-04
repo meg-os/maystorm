@@ -1,3 +1,5 @@
+use core::num::NonZeroU8;
+
 use super::*;
 
 /// Fixed ACPI Description Table
@@ -184,5 +186,11 @@ impl Fadt {
     #[inline]
     pub fn sleep_status_reg(&self) -> Option<Gas> {
         self.sleep_status_reg.checked()
+    }
+
+    /// The RTC CMOS RAM index to the century of data value
+    #[inline]
+    pub fn century_index(&self) -> Option<NonZeroU8> {
+        NonZeroU8::new(self.century)
     }
 }

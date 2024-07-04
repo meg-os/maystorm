@@ -1,6 +1,6 @@
 use crate::fs::{devfs::*, *};
-use alloc::borrow::ToOwned;
-use megstd::{io::Result, Arc, String};
+use crate::*;
+use megstd::io::Result;
 
 /// Zero Device `/dev/zero`
 pub struct Zero;

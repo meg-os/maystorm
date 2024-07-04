@@ -1,33 +1,27 @@
 use super::*;
-use crate::{
-    r,
-    sync::{fifo::AsyncEventQueue, spinlock::SpinMutex, RwLock},
-    task::{scheduler::*, Task},
-    *,
-};
-use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
-use core::{
-    mem::{size_of, MaybeUninit},
-    num::NonZeroU8,
-    ops::Deref,
-    pin::Pin,
-    ptr::null_mut,
-    slice,
-    sync::atomic::*,
-    time::Duration,
-};
+use crate::sync::{fifo::AsyncEventQueue, spinlock::SpinMutex, RwLock};
+use crate::task::{scheduler::*, Task};
+use crate::*;
+use core::mem::{size_of, MaybeUninit};
+use core::num::NonZeroU8;
+use core::ops::Deref;
+use core::pin::Pin;
+use core::ptr::null_mut;
+use core::slice;
+use core::sync::atomic::*;
+use core::time::Duration;
 use futures_util::Future;
 use megstd::uuid::Uuid;
 
-/// USB Driver to Host interface
-pub trait UsbHostInterface {
+/// USB Device to Host interface
+pub trait UsbDeviceInterface {
     fn parent_device_address(&self) -> Option<UsbAddress>;
 
     fn route_string(&self) -> UsbRouteString;
 
     fn speed(&self) -> PSIV;
 
-    fn set_max_packet_size(&self, max_packet_size: usize) -> Result<(), UsbError>;
+    fn set_max_packet_size(&self, max_packet_size: UsbLength) -> Result<(), UsbError>;
 
     fn configure_endpoint(&self, desc: &UsbEndpointDescriptor) -> Result<(), UsbError>;
 
@@ -50,27 +44,27 @@ pub trait UsbHostInterface {
         self: Arc<Self>,
         setup: UsbControlSetupData,
         data: *mut u8,
-    ) -> Pin<Box<dyn Future<Output = Result<usize, UsbError>>>>;
+    ) -> Pin<Box<dyn Future<Output = Result<UsbLength, UsbError>>>>;
 
     unsafe fn control_send(
         self: Arc<Self>,
         setup: UsbControlSetupData,
         data: *const u8,
-    ) -> Pin<Box<dyn Future<Output = Result<usize, UsbError>>>>;
+    ) -> Pin<Box<dyn Future<Output = Result<UsbLength, UsbError>>>>;
 
     unsafe fn read(
         self: Arc<Self>,
         ep: UsbEndpointAddress,
         buffer: *mut u8,
-        len: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<usize, UsbError>>>>;
+        len: UsbLength,
+    ) -> Pin<Box<dyn Future<Output = Result<UsbLength, UsbError>>>>;
 
     unsafe fn write(
         self: Arc<Self>,
         ep: UsbEndpointAddress,
         buffer: *const u8,
-        len: usize,
-    ) -> Pin<Box<dyn Future<Output = Result<usize, UsbError>>>>;
+        len: UsbLength,
+    ) -> Pin<Box<dyn Future<Output = Result<UsbLength, UsbError>>>>;
 }
 
 pub trait UsbClassDriverStarter {
@@ -135,7 +129,7 @@ impl UsbManager {
     /// Initialize the USB device and tie it to the appropriate class driver.
     pub async fn instantiate(
         addr: UsbAddress,
-        ctx: Arc<dyn UsbHostInterface>,
+        ctx: Arc<dyn UsbDeviceInterface>,
     ) -> Result<(), UsbError> {
         match UsbDeviceContext::new(addr, ctx).await {
             Ok(device) => {
@@ -342,13 +336,13 @@ impl Deref for UsbDeviceIterResult {
 }
 
 pub struct UsbDeviceContext {
-    host: Arc<dyn UsbHostInterface>,
+    host: Arc<dyn UsbDeviceInterface>,
     device: UsbDevice,
 }
 
 impl UsbDeviceContext {
     #[inline]
-    async fn new(addr: UsbAddress, host: Arc<dyn UsbHostInterface>) -> Result<Self, UsbError> {
+    async fn new(addr: UsbAddress, host: Arc<dyn UsbDeviceInterface>) -> Result<Self, UsbError> {
         let mut device_desc: Option<UsbDeviceDescriptor> = None;
         for _ in 0..5 {
             if host.speed() == PSIV::FS {
@@ -360,14 +354,14 @@ impl UsbDeviceContext {
                         UsbControlRequestBitmap::GET_DEVICE,
                         UsbDescriptorType::Device,
                         0,
-                        8,
+                        UsbLength(8),
                     ),
                     &mut packet,
                 )
                 .await
                 {
                     Ok(_) => {
-                        let max_packet_size = packet[7] as usize;
+                        let max_packet_size = UsbLength(packet[7] as u16);
                         let _ = host.set_max_packet_size(max_packet_size);
                     }
                     Err(_) => (),
@@ -434,18 +428,18 @@ impl UsbDeviceContext {
 
                 match cap_type {
                     UsbDeviceCapabilityType::SuperspeedUsb => {
-                        let Some(descriptor) = UsbSsDeviceCapability::from_slice(
-                            &bos_blob[cursor..]
-                        ) else {
-                            break
+                        let Some(descriptor) =
+                            UsbSsDeviceCapability::from_slice(&bos_blob[cursor..])
+                        else {
+                            break;
                         };
                         bos.ss_dev_cap = Some(*descriptor);
                     }
                     UsbDeviceCapabilityType::ContainerId => {
-                        let Some(descriptor) = UsbContainerIdCapability::from_slice(
-                            &bos_blob[cursor..]
-                        ) else {
-                            break
+                        let Some(descriptor) =
+                            UsbContainerIdCapability::from_slice(&bos_blob[cursor..])
+                        else {
+                            break;
                         };
                         uuid = Uuid::from_slice(descriptor.uuid());
                         bos.container_id = Some(*descriptor);
@@ -494,10 +488,10 @@ impl UsbDeviceContext {
 
             match desc_type {
                 UsbDescriptorType::Configuration => {
-                    let Some(descriptor) = UsbConfigurationDescriptor::from_slice(
-                        &config[cursor..]
-                    ) else {
-                        break
+                    let Some(descriptor) =
+                        UsbConfigurationDescriptor::from_slice(&config[cursor..])
+                    else {
+                        break;
                     };
                     if let Some(current_configuration) = current_configuration {
                         configurations.push(current_configuration);
@@ -513,10 +507,9 @@ impl UsbDeviceContext {
                     current_interface = None;
                 }
                 UsbDescriptorType::Interface => {
-                    let Some(descriptor) = UsbInterfaceDescriptor::from_slice(
-                        &config[cursor..]
-                    ) else {
-                        break
+                    let Some(descriptor) = UsbInterfaceDescriptor::from_slice(&config[cursor..])
+                    else {
+                        break;
                     };
                     let current_configuration = match current_configuration {
                         Some(ref mut v) => v,
@@ -538,10 +531,9 @@ impl UsbDeviceContext {
                     });
                 }
                 UsbDescriptorType::Endpoint => {
-                    let Some(descriptor) = UsbEndpointDescriptor::from_slice(
-                        &config[cursor..]
-                    ) else {
-                        break
+                    let Some(descriptor) = UsbEndpointDescriptor::from_slice(&config[cursor..])
+                    else {
+                        break;
                     };
                     let current_interface = match current_interface {
                         Some(ref mut v) => v,
@@ -563,10 +555,9 @@ impl UsbDeviceContext {
                     });
                 }
                 UsbDescriptorType::HidClass => {
-                    let Some(descriptor) = UsbHidClassDescriptor::from_slice(
-                        &config[cursor..]
-                    ) else {
-                        break
+                    let Some(descriptor) = UsbHidClassDescriptor::from_slice(&config[cursor..])
+                    else {
+                        break;
                     };
                     let current_interface = match current_interface {
                         Some(ref mut v) => v,
@@ -575,8 +566,8 @@ impl UsbDeviceContext {
                         }
                     };
                     for (report_type, len) in descriptor.children() {
-                        let mut vec = Vec::with_capacity(len);
-                        vec.resize(len, 0);
+                        let mut vec = Vec::with_capacity(len.as_usize());
+                        vec.resize(len.as_usize(), 0);
                         match Self::_get_hid_descriptor(
                             &host,
                             current_interface.if_no(),
@@ -652,11 +643,13 @@ impl UsbDeviceContext {
         Ok(Self { host, device })
     }
 
-    fn host(&self) -> &dyn UsbHostInterface {
+    #[inline]
+    fn host(&self) -> &dyn UsbDeviceInterface {
         self.host.as_ref()
     }
 
-    fn host_clone(&self) -> Arc<dyn UsbHostInterface> {
+    #[inline]
+    fn host_clone(&self) -> Arc<dyn UsbDeviceInterface> {
         self.host.clone()
     }
 
@@ -704,7 +697,9 @@ impl UsbDeviceContext {
 
     #[inline]
     pub async fn detach_child_device(&self, port: UsbHubPortNumber) -> Result<(), UsbError> {
-        let Some(child) = self.child_device(port) else { return Err(UsbError::InvalidParameter) };
+        let Some(child) = self.child_device(port) else {
+            return Err(UsbError::InvalidParameter);
+        };
         UsbManager::remove_device(child)
     }
 
@@ -718,7 +713,7 @@ impl UsbDeviceContext {
         ep: UsbEndpointAddress,
         buffer: &mut T,
     ) -> Result<(), UsbError> {
-        let len = size_of::<T>();
+        let len = UsbLength(u16::try_from(size_of::<T>()).map_err(|_| UsbError::InvalidParameter)?);
         unsafe {
             self.host_clone()
                 .read(ep, buffer as *const _ as *mut u8, len)
@@ -733,23 +728,23 @@ impl UsbDeviceContext {
         })
     }
 
-    pub async fn read_vec(
+    pub async fn read_to_vec(
         &self,
         ep: UsbEndpointAddress,
         buffer: &mut Vec<u8>,
-        min_len: usize,
-        max_len: usize,
+        min_len: UsbLength,
+        max_len: UsbLength,
     ) -> Result<(), UsbError> {
-        buffer.resize(0, 0);
+        buffer.clear();
         buffer
-            .try_reserve(max_len)
+            .try_reserve(max_len.as_usize())
             .map_err(|_| UsbError::OutOfMemory)?;
-        buffer.resize(max_len, 0);
+        buffer.resize(max_len.as_usize(), 0);
 
         self.read_slice(ep, buffer.as_mut_slice(), min_len, max_len)
             .await
             .map(|new_len| {
-                buffer.resize(new_len, 0);
+                buffer.resize(new_len.as_usize(), 0);
                 ()
             })
     }
@@ -758,10 +753,10 @@ impl UsbDeviceContext {
         &self,
         ep: UsbEndpointAddress,
         buffer: &mut [u8],
-        min_len: usize,
-        max_len: usize,
-    ) -> Result<usize, UsbError> {
-        if max_len > buffer.len() || min_len > max_len {
+        min_len: UsbLength,
+        max_len: UsbLength,
+    ) -> Result<UsbLength, UsbError> {
+        if max_len.as_usize() > buffer.len() || min_len > max_len {
             return Err(UsbError::InvalidParameter);
         }
         unsafe { self.host_clone().read(ep, buffer.as_mut_ptr(), max_len) }
@@ -780,7 +775,7 @@ impl UsbDeviceContext {
         ep: UsbEndpointAddress,
         buffer: &T,
     ) -> Result<(), UsbError> {
-        let len = size_of::<T>();
+        let len = UsbLength(u16::try_from(size_of::<T>()).map_err(|_| UsbError::InvalidParameter)?);
         unsafe {
             self.host_clone()
                 .write(ep, buffer as *const _ as *const u8, len)
@@ -796,7 +791,7 @@ impl UsbDeviceContext {
     }
 
     pub async fn write_slice(&self, ep: UsbEndpointAddress, buffer: &[u8]) -> Result<(), UsbError> {
-        let len = buffer.len();
+        let len = UsbLength(u16::try_from(buffer.len()).map_err(|_| UsbError::InvalidParameter)?);
         unsafe { self.host_clone().write(ep, buffer.as_ptr(), len) }
             .await
             .and_then(|result| {
@@ -818,8 +813,8 @@ impl UsbDeviceContext {
         &self,
         setup: UsbControlSetupData,
         vec: &mut Vec<u8>,
-        min_len: usize,
-        max_len: usize,
+        min_len: UsbLength,
+        max_len: UsbLength,
     ) -> Result<(), UsbError> {
         Self::_control_vec(&self.host_clone(), setup, vec, min_len, max_len).await
     }
@@ -835,14 +830,15 @@ impl UsbDeviceContext {
 
     pub async fn control_send(
         &self,
-        mut setup: UsbControlSetupData,
-        max_len: usize,
+        setup: UsbControlSetupData,
+        max_len: UsbLength,
         data: &[u8],
     ) -> Result<(), UsbError> {
-        if max_len > data.len() {
+        if max_len.as_usize() > data.len() {
             return Err(UsbError::InvalidParameter);
         }
-        setup.wLength = max_len as u16;
+        let mut setup = setup;
+        setup.wLength = max_len;
         match unsafe { self.host_clone().control_send(setup, data.as_ptr()) }.await {
             Ok(_v) => Ok(()),
             Err(err) => Err(err),
@@ -850,10 +846,10 @@ impl UsbDeviceContext {
     }
 
     async fn _control_nodata(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         setup: UsbControlSetupData,
     ) -> Result<(), UsbError> {
-        if setup.wLength > 0 {
+        if setup.wLength > UsbLength(0) {
             return Err(UsbError::InvalidParameter);
         }
         unsafe { host.clone().control_recv(setup, null_mut()) }
@@ -862,24 +858,25 @@ impl UsbDeviceContext {
     }
 
     async fn _control_vec(
-        host: &Arc<dyn UsbHostInterface>,
-        mut setup: UsbControlSetupData,
+        host: &Arc<dyn UsbDeviceInterface>,
+        setup: UsbControlSetupData,
         buffer: &mut Vec<u8>,
-        min_len: usize,
-        max_len: usize,
+        min_len: UsbLength,
+        max_len: UsbLength,
     ) -> Result<(), UsbError> {
-        buffer.resize(0, 0);
+        buffer.clear();
         buffer
-            .try_reserve(max_len)
+            .try_reserve(max_len.as_usize())
             .map_err(|_| UsbError::OutOfMemory)?;
-        buffer.resize(max_len, 0);
+        buffer.resize(max_len.as_usize(), 0);
 
-        setup.wLength = max_len as u16;
+        let mut setup = setup;
+        setup.wLength = max_len;
         unsafe { host.clone().control_recv(setup, buffer.as_mut_ptr()) }
             .await
             .and_then(|len| {
                 if len >= min_len {
-                    buffer.resize(len, 0);
+                    buffer.resize(len.as_usize(), 0);
                     Ok(())
                 } else {
                     Err(UsbError::ShortPacket)
@@ -888,15 +885,16 @@ impl UsbDeviceContext {
     }
 
     async fn _control_slice(
-        host: &Arc<dyn UsbHostInterface>,
-        mut setup: UsbControlSetupData,
+        host: &Arc<dyn UsbDeviceInterface>,
+        setup: UsbControlSetupData,
         data: &mut [u8],
     ) -> Result<(), UsbError> {
-        setup.wLength = data.len() as u16;
+        let mut setup = setup;
+        setup.wLength = UsbLength(data.len() as u16);
         unsafe { host.clone().control_recv(setup, data.as_mut_ptr()) }
             .await
             .and_then(|len| {
-                if len == data.len() {
+                if len.as_usize() == data.len() {
                     Ok(())
                 } else {
                     Err(UsbError::ShortPacket)
@@ -906,18 +904,18 @@ impl UsbDeviceContext {
 
     #[inline]
     async fn _get_variable_length_device_descriptor<F, T: UsbDescriptor>(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         index: u8,
         get_length: F,
     ) -> Result<Vec<u8>, UsbError>
     where
-        F: FnOnce(T) -> usize,
+        F: FnOnce(T) -> UsbLength,
     {
         let prot_desc: T = Self::_get_device_descriptor(host, index).await?;
         let total_length = get_length(prot_desc);
 
-        let mut vec = Vec::with_capacity(total_length);
-        vec.resize(total_length, 0);
+        let mut vec = Vec::with_capacity(total_length.as_usize());
+        vec.resize(total_length.as_usize(), 0);
 
         Self::_control_slice(
             host,
@@ -936,7 +934,7 @@ impl UsbDeviceContext {
 
     #[inline]
     async fn _get_device_descriptor<T: UsbDescriptor>(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         index: u8,
     ) -> Result<T, UsbError> {
         Self::_get_descriptor(host, UsbControlRequestBitmap::GET_DEVICE, index).await
@@ -953,11 +951,12 @@ impl UsbDeviceContext {
     }
 
     async fn _get_descriptor<T: UsbDescriptor>(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         request_type: UsbControlRequestBitmap,
         index: u8,
     ) -> Result<T, UsbError> {
-        let size_of_t = size_of::<T>();
+        let size_of_t =
+            UsbLength(u16::try_from(size_of::<T>()).map_err(|_| UsbError::InvalidParameter)?);
         let mut result = MaybeUninit::<T>::zeroed();
         match unsafe {
             host.clone()
@@ -994,7 +993,7 @@ impl UsbDeviceContext {
     }
 
     async fn _get_string(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         index: Option<NonZeroU8>,
         lang_id: UsbLangId,
     ) -> Option<String> {
@@ -1006,12 +1005,12 @@ impl UsbDeviceContext {
             UsbControlRequestBitmap::GET_DEVICE,
             UsbDescriptorType::String,
             index,
-            0,
+            UsbLength(0),
         )
         .index(lang_id.0);
 
         let mut vec = Vec::new();
-        match Self::_control_vec(host, setup, &mut vec, 4, 255).await {
+        match Self::_control_vec(host, setup, &mut vec, UsbLength(4), UsbLength(255)).await {
             Ok(_) => (),
             Err(_) => return None,
         }
@@ -1031,18 +1030,16 @@ impl UsbDeviceContext {
     }
 
     async fn _set_configuration(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         value: UsbConfigurationValue,
     ) -> Result<(), UsbError> {
         Self::_control_nodata(
             host,
-            UsbControlSetupData {
-                bmRequestType: UsbControlRequestBitmap::SET_DEVICE,
-                bRequest: UsbControlRequest::SET_CONFIGURATION,
-                wValue: value.0 as u16,
-                wIndex: 0,
-                wLength: 0,
-            },
+            UsbControlSetupData::request(
+                UsbControlRequestBitmap::SET_DEVICE,
+                UsbControlRequest::SET_CONFIGURATION,
+            )
+            .value(value.0 as u16),
         )
         .await
     }
@@ -1086,10 +1083,9 @@ impl UsbDeviceContext {
     }
 
     async fn _set_sel(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         values: &Usb3ExitLatencyValues,
     ) -> Result<(), UsbError> {
-        let length = 6;
         let data = values as *const _ as *const u8;
         unsafe {
             host.clone().control_send(
@@ -1097,7 +1093,7 @@ impl UsbDeviceContext {
                     UsbControlRequestBitmap::SET_DEVICE,
                     UsbControlRequest::SET_SEL,
                 )
-                .length(length),
+                .length(UsbLength(6)),
                 data,
             )
         }
@@ -1106,11 +1102,11 @@ impl UsbDeviceContext {
     }
 
     async fn _get_hid_descriptor(
-        host: &Arc<dyn UsbHostInterface>,
+        host: &Arc<dyn UsbDeviceInterface>,
         if_no: UsbInterfaceNumber,
         report_type: UsbDescriptorType,
         report_id: u8,
-        len: usize,
+        len: UsbLength,
         slice: &mut [u8],
     ) -> Result<(), UsbError> {
         Self::_control_slice(

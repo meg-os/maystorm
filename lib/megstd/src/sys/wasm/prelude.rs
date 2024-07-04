@@ -4,7 +4,7 @@ use crate::sys::syscall::*;
 macro_rules! print {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        write!(OsPrint(), $($arg)*).unwrap();
+        let _ = write!(OsPrint(), $($arg)*);
     }};
 }
 
@@ -12,14 +12,14 @@ macro_rules! print {
 macro_rules! println {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
-        writeln!(OsPrint(), $($arg)*).unwrap();
+        let _ = writeln!(OsPrint(), $($arg)*);
     }};
 }
 
 #[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    // println!("{}", info);
+    println!("{}", _info);
     os_exit();
 }
 

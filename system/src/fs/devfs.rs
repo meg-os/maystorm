@@ -1,15 +1,11 @@
 use super::*;
-use crate::{sync::RwLock, *};
-use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
-use core::{
-    mem::MaybeUninit,
-    num::NonZeroU32,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-use megstd::{
-    fs::FileType,
-    io::{ErrorKind, Result},
-};
+use crate::sync::RwLock;
+use crate::*;
+use core::mem::MaybeUninit;
+use core::num::NonZeroU32;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use megstd::fs::FileType;
+use megstd::io::{ErrorKind, Result};
 
 const ROOT_INODE: INodeType = unsafe { INodeType::new_unchecked(1) };
 
@@ -132,8 +128,8 @@ impl FsDriver for DevFsDriver {
         "devfs".to_owned()
     }
 
-    fn description(&self) -> String {
-        "".to_owned()
+    fn description(&self) -> Option<String> {
+        None
     }
 
     fn root_dir(&self) -> INodeType {
@@ -163,7 +159,7 @@ impl FsDriver for DevFsDriver {
 
     fn open(self: Arc<Self>, inode: INodeType) -> Result<Arc<dyn FsAccessToken>> {
         let Ok(dev_no) = inode.try_into() else {
-            return Err(ErrorKind::NotFound.into())
+            return Err(ErrorKind::NotFound.into());
         };
         DevFs::get_file(dev_no)
             .ok_or(ErrorKind::NotFound.into())
@@ -223,7 +219,7 @@ pub struct MajorDevNo(NonZeroU32);
 impl From<MajorDevNo> for INodeType {
     #[inline]
     fn from(value: MajorDevNo) -> Self {
-        unsafe { INodeType::new_unchecked((value.0.get() as u64) << 48) }
+        unsafe { INodeType::new_unchecked((value.0.get() as u128) << 64) }
     }
 }
 
@@ -232,7 +228,7 @@ impl TryFrom<INodeType> for MajorDevNo {
 
     #[inline]
     fn try_from(value: INodeType) -> core::result::Result<Self, Self::Error> {
-        let value = value.get() >> 48;
+        let value = value.get() >> 64;
         ((value as usize) < DevFs::MAX_MINOR_DEVICE)
             .then(|| NonZeroU32::new(value as u32))
             .flatten()
@@ -247,7 +243,7 @@ pub struct MinorDevNo(NonZeroU32);
 impl From<MinorDevNo> for INodeType {
     #[inline]
     fn from(value: MinorDevNo) -> Self {
-        unsafe { INodeType::new_unchecked(value.0.get() as u64) }
+        unsafe { INodeType::new_unchecked(value.0.get() as u128) }
     }
 }
 

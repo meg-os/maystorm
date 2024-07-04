@@ -1,63 +1,18 @@
-//! Arlequin Subsystem
+//! Arlequin Subsystem (expr)
 
 use super::*;
-// use megstd::*;
 
-/// Recognize .bin file
-pub struct ArleRecognizer {
-    _phantom: (),
-}
+/// Load .bin file
+pub struct ArleBinaryLoader;
 
-impl ArleRecognizer {
-    pub fn new() -> Box<Self> {
-        Box::new(Self { _phantom: () })
-    }
-}
-
-impl BinaryRecognizer for ArleRecognizer {
-    fn recognize(&self, blob: &[u8]) -> Option<Box<dyn BinaryLoader>> {
-        ArleLoader::identity(blob).map(|v| Box::new(v) as Box<dyn BinaryLoader>)
-    }
-}
-
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//--//
-
-pub struct ArleLoader {
-    lio: LoadedImageOption,
-    option: LaunchOption,
-}
-
-#[derive(Default)]
-pub struct LaunchOption {
-    start: usize,
-    stack_pointer: usize,
-}
-
-impl ArleLoader {
+impl ArleBinaryLoader {
     #[inline]
-    fn new(option: LaunchOption) -> Self {
-        Self {
-            lio: LoadedImageOption::default(),
-            option,
-        }
+    pub fn new() -> Box<Self> {
+        Box::new(Self {})
     }
 
-    pub fn identity(blob: &[u8]) -> Option<Self> {
-        if blob[0] == 0xC3 {
-            Some(Self::new(LaunchOption {
-                start: 0,
-                stack_pointer: 0,
-            }))
-        } else {
-            None
-        }
+    pub fn identity(blob: &[u8]) -> bool {
+        blob[0] == 0xC3
     }
 
     pub fn start(_: usize) {
@@ -71,20 +26,27 @@ impl ArleLoader {
     }
 }
 
-impl BinaryLoader for ArleLoader {
-    fn option(&mut self) -> &mut LoadedImageOption {
-        &mut self.lio
+impl BinaryLoader for ArleBinaryLoader {
+    fn preferred_extension<'a>(&self) -> &'a str {
+        "bin"
     }
 
-    fn load(&mut self, _blob: &[u8]) -> Result<(), ()> {
-        todo!()
+    fn recognize(&self, blob: &[u8]) -> bool {
+        ArleBinaryLoader::identity(blob)
     }
 
-    fn invoke_start(self: Box<Self>) -> Option<ProcessId> {
-        SpawnOption::new()
-            .personality(ArleContext::new(self.option))
-            .start_process(Self::start, 0, self.lio.name.as_str())
+    fn spawn(&self, _blob: &[u8], _lio: LoadedImageOption) -> Result<ProcessId, Error> {
+        // SpawnOption::new()
+        //     .personality(ArleContext::new(self.option))
+        //     .start_process(Self::start, 0, self.lio.name.as_str())
+        Err(ErrorKind::Other.into())
     }
+}
+
+#[derive(Default)]
+pub struct LaunchOption {
+    start: usize,
+    stack_pointer: usize,
 }
 
 pub struct ArleContext {

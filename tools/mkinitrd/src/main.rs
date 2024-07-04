@@ -137,8 +137,18 @@ fn append_path(vec: &mut Vec<(String, OsString)>, prefix: &str, path: &OsStr) {
             // Bad files
             ".DS_Store" | "Thumbs.db" => (),
             _ => {
+                let mut needs_to_push = true;
                 let vpath = format!("{prefix}/{lpc}");
-                vec.push((vpath, path.as_os_str().to_owned()))
+                for item in vec.iter_mut() {
+                    if item.0 == vpath {
+                        item.1 = path.as_os_str().to_owned();
+                        needs_to_push = false;
+                        break;
+                    }
+                }
+                if needs_to_push {
+                    vec.push((vpath, path.as_os_str().to_owned()))
+                }
             }
         }
     } else {

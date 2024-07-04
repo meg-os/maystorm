@@ -1,8 +1,13 @@
 // PS/2 Device Driver
 
 use super::apic::*;
-use crate::{io::hid_mgr::*, sync::atomic::AtomicWrapperU8, task::scheduler::*, *};
-use core::{arch::asm, mem::transmute, time::Duration};
+use crate::io::hid_mgr::*;
+use crate::sync::atomic::AtomicWrapperU8;
+use crate::task::scheduler::*;
+use crate::*;
+use core::arch::asm;
+use core::mem::transmute;
+use core::time::Duration;
 use megstd::io::hid::*;
 
 static PS2: Ps2 = Ps2::new();

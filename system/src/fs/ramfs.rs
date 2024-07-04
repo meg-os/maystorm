@@ -1,15 +1,11 @@
 // use crate::*;
 use super::*;
 use crate::sync::Mutex;
-use core::{
-    ops::DerefMut,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-use megstd::{
-    fs::FileType,
-    io::{ErrorKind, Result},
-    Arc, BTreeMap, String, ToOwned, Vec, Weak,
-};
+use crate::*;
+use core::ops::DerefMut;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use megstd::fs::FileType;
+use megstd::io::{ErrorKind, Result};
 
 type ThisFs = RamFs;
 
@@ -79,7 +75,7 @@ impl RamFs {
             .fetch_update(Ordering::SeqCst, Ordering::Relaxed, |v| {
                 (self.inodes.lock().unwrap().len() < INODE_MAX).then(|| v + 1)
             })
-            .map(|v| unsafe { INodeType::new(1 + v as u64).unwrap_unchecked() })
+            .map(|v| unsafe { INodeType::new((1 + v) as u128).unwrap_unchecked() })
             .ok()
     }
 
@@ -110,8 +106,8 @@ impl FsDriver for RamFs {
         "ramfs".to_owned()
     }
 
-    fn description(&self) -> String {
-        "".to_owned()
+    fn description(&self) -> Option<String> {
+        None
     }
 
     fn root_dir(&self) -> INodeType {
@@ -208,10 +204,10 @@ impl FsDriver for RamFs {
                 None
             };
 
-            if let Some(ref new_) = new_
-                && old_.inode == new_.inode
-            {
-                return Ok(());
+            if let Some(ref new_) = new_ {
+                if old_.inode == new_.inode {
+                    return Ok(());
+                }
             }
 
             dir.force_rename(old_name, new_name).unwrap();
@@ -249,10 +245,10 @@ impl FsDriver for RamFs {
                 None
             };
 
-            if let Some(ref new_) = new_
-                && old_.inode == new_.inode
-            {
-                return Ok(());
+            if let Some(ref new_) = new_ {
+                if old_.inode == new_.inode {
+                    return Ok(());
+                }
             }
 
             let dir_ent = old_dir.remove(old_name, true).unwrap();

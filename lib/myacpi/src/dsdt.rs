@@ -2,6 +2,7 @@ use super::*;
 
 /// Differentiated System Description Table
 #[repr(C, packed)]
+#[allow(dead_code)]
 pub struct Dsdt {
     hdr: AcpiHeader,
 }
@@ -12,6 +13,7 @@ unsafe impl AcpiTable for Dsdt {
 
 /// Secondary System Descriptor Table
 #[repr(C, packed)]
+#[allow(dead_code)]
 pub struct Ssdt {
     hdr: AcpiHeader,
 }

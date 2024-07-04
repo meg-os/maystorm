@@ -1,8 +1,8 @@
 //! USB Mass Storage Device (Bulk Only Transfer) (08_06_50)
 
 use super::super::*;
-use crate::{task::Task, *};
-use alloc::sync::Arc;
+use crate::task::Task;
+use crate::*;
 use core::pin::Pin;
 use futures_util::Future;
 
@@ -74,7 +74,7 @@ impl UsbMsdDriver {
         _device: Arc<UsbDeviceContext>,
         _if_no: UsbInterfaceNumber,
         _ep: UsbEndpointAddress,
-        _ps: u16,
+        _ps: UsbLength,
     ) {
         // let _max_lun = Self::get_max_lun(&device, if_no).await.unwrap();
         // log!("MAX_LUN {}", max_lun);
@@ -91,8 +91,7 @@ impl UsbMsdDriver {
                     UsbControlRequestBitmap(0xA1),
                     UsbControlRequest(0xFE),
                 )
-                .index_if(if_no)
-                .length(1),
+                .index_if(if_no),
                 &mut result,
             )
             .await

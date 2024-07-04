@@ -1,0 +1,5 @@
+env HOME=/boot
+env PATH=/bin:/boot:/boot/bin:/boot/system/bin
+ver
+sysctl device
+cd

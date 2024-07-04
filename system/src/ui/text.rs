@@ -2,7 +2,7 @@
 
 use super::font::*;
 use crate::*;
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::borrow::Cow;
 use core::num::NonZeroUsize;
 use megstd::drawing::*;
 
@@ -53,7 +53,7 @@ impl AttributedString<'_> {
     }
 
     #[inline]
-    pub fn shadow_offset(&self) -> Movement {
+    pub fn shadow_offset(&self) -> Point {
         self.attributes.shadow_offset
     }
 
@@ -93,7 +93,7 @@ pub struct AttributeSet {
     align: TextAlignment,
     valign: VerticalAlignment,
     shadow_color: Color,
-    shadow_offset: Movement,
+    shadow_offset: Point,
 }
 
 impl AttributeSet {
@@ -106,7 +106,7 @@ impl AttributeSet {
             align: TextAlignment::Leading,
             valign: VerticalAlignment::Center,
             shadow_color: Color::TRANSPARENT,
-            shadow_offset: Movement::default(),
+            shadow_offset: Point::default(),
         }
     }
 
@@ -224,7 +224,7 @@ impl AttributeSet {
     }
 
     #[inline]
-    pub fn shadow(mut self, color: Color, offset: Movement) -> Self {
+    pub fn shadow(mut self, color: Color, offset: Point) -> Self {
         self.shadow_color = color;
         self.shadow_offset = offset;
         self
@@ -279,8 +279,8 @@ impl Default for VerticalAlignment {
 pub struct LineStatus {
     pub start_position: usize,
     pub end_position: usize,
-    pub width: isize,
-    pub height: isize,
+    pub width: u32,
+    pub height: u32,
 }
 
 impl LineStatus {
@@ -295,7 +295,7 @@ impl LineStatus {
     }
 
     #[inline]
-    fn new_line(&mut self, start_position: usize, width: isize, height: isize) {
+    fn new_line(&mut self, start_position: usize, width: u32, height: u32) {
         self.start_position = start_position;
         self.end_position = start_position;
         self.width = width;
@@ -330,7 +330,7 @@ impl TextProcessing {
                 current_height += current_line.height;
                 vec.push(current_line);
                 current_line = LineStatus::empty();
-                if vec.len() >= max_lines || current_height >= size.height() {
+                if vec.len() >= max_lines || current_height > size.height() {
                     break;
                 }
                 current_line.new_line(index + 1, 0, font.line_height());
@@ -338,7 +338,9 @@ impl TextProcessing {
             } else {
                 current_line.end_position = index;
                 let current_width = font.width_of(c);
-                let new_line_width = current_line.width + font.kern(prev_char, c) + current_width;
+                let new_line_width =
+                    (current_line.width as i32 + font.kern(prev_char, c) + current_width as i32)
+                        .max(0) as u32;
                 let line_is_over = if no_wrap {
                     current_line.width > size.width
                 } else {
@@ -348,7 +350,7 @@ impl TextProcessing {
                     current_height += current_line.height;
                     vec.push(current_line);
                     current_line = LineStatus::empty();
-                    if vec.len() >= max_lines || current_height >= size.height() {
+                    if vec.len() >= max_lines || current_height > size.height() {
                         break;
                     }
                     current_line.new_line(index, current_width, font.line_height());
@@ -376,7 +378,7 @@ impl TextProcessing {
     ) -> Size {
         let lines = Self::line_statuses(font, text, size, max_lines, line_break);
         Size::new(
-            lines.iter().fold(0, |v, i| isize::max(v, i.width)),
+            lines.iter().fold(0, |v, i| v.max(i.width)),
             lines.iter().fold(0, |v, i| v + i.height),
         )
     }
@@ -393,10 +395,10 @@ impl TextProcessing {
         align: TextAlignment,
         valign: VerticalAlignment,
         shadow_color: Color,
-        shadow_offset: Movement,
+        shadow_offset: Point,
     ) {
         let Ok(coords) = Coordinates::from_rect(rect) else {
-            return
+            return;
         };
 
         // bitmap.draw_rect(rect, Color::YELLOW);
@@ -410,8 +412,10 @@ impl TextProcessing {
         // let preferred_width = lines.iter().fold(0, |v, i| isize::max(v, i.width));
         cursor.y = match valign {
             VerticalAlignment::Top => coords.top,
-            VerticalAlignment::Center => coords.top + (rect.height() - perferred_height) / 2,
-            VerticalAlignment::Bottom => coords.bottom - perferred_height,
+            VerticalAlignment::Center => {
+                coords.top + ((rect.height() - perferred_height) / 2) as i32
+            }
+            VerticalAlignment::Bottom => coords.bottom - perferred_height as i32,
         };
 
         for line in lines {
@@ -422,8 +426,10 @@ impl TextProcessing {
             if line.start_position < line.end_position {
                 cursor.x = match align {
                     TextAlignment::Leading | TextAlignment::Left => coords.left,
-                    TextAlignment::Trailing | TextAlignment::Right => coords.right - line.width,
-                    TextAlignment::Center => coords.left + (rect.width() - line.width) / 2,
+                    TextAlignment::Trailing | TextAlignment::Right => {
+                        coords.right - line.width as i32
+                    }
+                    TextAlignment::Center => coords.left + ((rect.width() - line.width) / 2) as i32,
                 };
                 let mut prev_char = ' ';
 
@@ -457,13 +463,13 @@ impl TextProcessing {
                     }
 
                     font.draw_char(c, bitmap, cursor, color);
-                    cursor.x += font_width;
+                    cursor.x += font_width as i32;
                     prev_char = c;
                 }
             }
 
             prev_position = line.end_position;
-            cursor.y += line.height;
+            cursor.y += line.height as i32;
         }
     }
 }

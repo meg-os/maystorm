@@ -1,7 +1,7 @@
 //! USB Device Driver Modules
 
 use super::{UsbClassDriverStarter, UsbInterfaceDriverStarter};
-use alloc::{boxed::Box, vec::Vec};
+use crate::*;
 
 pub mod usb_audio;
 pub mod usb_hid;

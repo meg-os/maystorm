@@ -4,7 +4,7 @@ pub mod random;
 // pub mod stdio;
 pub mod zero;
 
-use crate::{assert_call_once, System};
+use crate::assert_call_once;
 
 pub(super) fn install_drivers() {
     assert_call_once!();

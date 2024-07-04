@@ -1,13 +1,10 @@
 //! MEG-OS Boot Procotol
 
 #![no_std]
-#![feature(const_trait_impl)]
 
-use bitflags::*;
 use core::fmt;
 
 #[repr(C)]
-#[derive(Default)]
 pub struct BootInfo {
     pub platform: PlatformType,
     pub color_mode: ColorMode,
@@ -15,7 +12,7 @@ pub struct BootInfo {
     pub screen_height: u16,
     pub vram_stride: u16,
     pub vram_base: u64,
-    pub master_cr3: u64,
+    pub master_page_table: u64,
     pub acpi_rsdptr: u64,
     pub dtb: u64,
     pub smbios: u64,
@@ -30,26 +27,49 @@ pub struct BootInfo {
     pub flags: BootFlags,
 }
 
-#[non_exhaustive]
+impl Default for BootInfo {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            platform: Default::default(),
+            color_mode: Default::default(),
+            screen_width: Default::default(),
+            screen_height: Default::default(),
+            vram_stride: Default::default(),
+            vram_base: Default::default(),
+            master_page_table: Default::default(),
+            acpi_rsdptr: Default::default(),
+            dtb: Default::default(),
+            smbios: Default::default(),
+            kernel_base: Default::default(),
+            total_memory_size: Default::default(),
+            cmdline: Default::default(),
+            initrd_base: Default::default(),
+            initrd_size: Default::default(),
+            mmap_base: Default::default(),
+            mmap_len: Default::default(),
+            real_bitmap: Default::default(),
+            flags: Default::default(),
+        }
+    }
+}
+
 #[repr(u8)]
-#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlatformType {
-    Unknown = 0,
+    #[default]
+    Unspecified = 0,
     /// IA32-Legacy NEC PC-98 Series Computer
     Nec98 = 1,
     /// IA32-Legacy IBM PC Compatible
     PcCompatible = 2,
     /// IA32-Legacy Fujitsu FM TOWNS
     FmTowns = 3,
-    /// UEFI based
-    UEFI = 4,
-}
-
-impl const Default for PlatformType {
-    #[inline]
-    fn default() -> Self {
-        Self::Unknown
-    }
+    /// Native UEFI
+    UefiNative = 4,
+    /// Non native UEFI
+    UefiBridged = 5,
 }
 
 impl fmt::Display for PlatformType {
@@ -59,7 +79,8 @@ impl fmt::Display for PlatformType {
             Self::PcCompatible => write!(f, "PC Compatible"),
             Self::Nec98 => write!(f, "PC-98"),
             Self::FmTowns => write!(f, "FM TOWNS"),
-            Self::UEFI => write!(f, "UEFI"),
+            Self::UefiNative => write!(f, "UEFI"),
+            Self::UefiBridged => write!(f, "UEFI"),
             _ => write!(f, "Unknown"),
         }
     }
@@ -67,8 +88,9 @@ impl fmt::Display for PlatformType {
 
 #[non_exhaustive]
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ColorMode {
+    #[default]
     Unspecified = 0,
     /// 8bit Indexed Color Mode
     Indexed8 = 8,
@@ -78,22 +100,18 @@ pub enum ColorMode {
     Abgr32 = 33,
 }
 
-impl const Default for ColorMode {
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct BootFlags(u32);
+
+impl BootFlags {
     #[inline]
-    fn default() -> Self {
-        Self::Unspecified
+    pub const fn empty() -> Self {
+        Self(0)
     }
 }
 
-bitflags! {
-    pub struct BootFlags: u16 {
-        const FORCE_SINGLE  = 0b0000_0000_0000_0001;
-        const HEADLESS      = 0b0000_0000_0000_0010;
-        const DEBUG_MODE    = 0b0000_0000_0000_0100;
-    }
-}
-
-impl const Default for BootFlags {
+impl Default for BootFlags {
     #[inline]
     fn default() -> Self {
         Self::empty()

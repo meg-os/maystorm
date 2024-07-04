@@ -1,79 +1,15 @@
 //! Universal Serial Bus
 //!
 //! ```text
-//!   ┏━○
+//!  ┏━○
 //! ○┻┳━|＞
-//! ┗■
+//!   ┗■
 //! ```
 
-use core::{
-    fmt,
-    mem::{transmute, transmute_copy},
-    num::NonZeroU8,
-    time::Duration,
-};
-
-/// Valid USB bus addresses are 1 to 127.
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct UsbAddress(NonZeroU8);
-
-impl UsbAddress {
-    #[inline]
-    const fn from_nonzero(v: NonZeroU8) -> Self {
-        Self(v)
-    }
-
-    #[inline]
-    pub const fn from_u8(v: u8) -> Option<Self> {
-        match NonZeroU8::new(v) {
-            Some(v) => Some(Self::from_nonzero(v)),
-            None => None,
-        }
-    }
-
-    #[inline]
-    pub const fn as_u8(&self) -> u8 {
-        self.0.get()
-    }
-}
-
-impl From<NonZeroU8> for UsbAddress {
-    #[inline]
-    fn from(v: NonZeroU8) -> Self {
-        Self::from_nonzero(v)
-    }
-}
-
-/// 16-bit word type used in the USB descriptor.
-#[repr(transparent)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct UsbWord([u8; 2]);
-
-impl UsbWord {
-    #[inline]
-    pub const fn from_u16(val: u16) -> Self {
-        Self([val as u8, (val >> 8) as u8])
-    }
-
-    #[inline]
-    pub const fn as_u16(&self) -> u16 {
-        self.0[0] as u16 + (self.0[1] as u16) * 256
-    }
-}
-
-impl From<UsbWord> for u16 {
-    #[inline]
-    fn from(v: UsbWord) -> Self {
-        v.as_u16()
-    }
-}
-
-impl fmt::Debug for UsbWord {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:04x}", self.as_u16())
-    }
-}
+use core::fmt;
+use core::mem::{transmute, transmute_copy};
+use core::num::NonZeroU8;
+use core::time::Duration;
 
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -98,6 +34,68 @@ impl fmt::Display for UsbVersion {
         let part3 = (self.0 >> 4) & 0x0F;
         // let part4 = self.0 & 0x0F;
         write!(f, "{}.{}", part1 * 10 + part2, part3)
+    }
+}
+
+/// Valid USB bus addresses are 1 to 127.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UsbAddress(NonZeroU8);
+
+impl UsbAddress {
+    #[inline]
+    pub const unsafe fn from_nonzero_unchecked(v: NonZeroU8) -> Self {
+        Self(v)
+    }
+
+    #[inline]
+    pub fn from_nonzero(v: NonZeroU8) -> Option<Self> {
+        Self::from_u8(v.get())
+    }
+
+    #[inline]
+    pub fn from_u8(v: u8) -> Option<Self> {
+        (v > 0 && v < 128).then(|| unsafe { Self(NonZeroU8::new_unchecked(v)) })
+    }
+
+    #[inline]
+    pub const fn as_u8(&self) -> u8 {
+        self.0.get()
+    }
+}
+
+/// 16-bit word type used in the USB descriptor.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct UsbWord([u8; 2]);
+
+impl UsbWord {
+    #[inline]
+    pub const fn from_u16(val: u16) -> Self {
+        Self(val.to_le_bytes())
+    }
+
+    #[inline]
+    pub const fn as_u16(&self) -> u16 {
+        u16::from_le_bytes(self.0)
+    }
+
+    #[inline]
+    pub const fn as_length(&self) -> UsbLength {
+        UsbLength(self.as_u16())
+    }
+}
+
+impl From<UsbWord> for u16 {
+    #[inline]
+    fn from(v: UsbWord) -> Self {
+        v.as_u16()
+    }
+}
+
+impl fmt::Debug for UsbWord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:04x}", self.as_u16())
     }
 }
 
@@ -149,17 +147,21 @@ impl UsbClass {
     pub const XINPUT_IF3: Self = Self(0xFF_5D_04);
 
     #[inline]
-    pub const fn new(base: UsbBaseClass, sub: UsbSubClass, protocol: UsbProtocolCode) -> Self {
-        Self(((base.0 as u32) << 16) | ((sub.0 as u32) << 8) | (protocol.0 as u32))
+    pub const fn new(
+        base_class: UsbBaseClass,
+        sub_class: UsbSubClass,
+        protocol: UsbProtocolCode,
+    ) -> Self {
+        Self(((base_class.0 as u32) << 16) | ((sub_class.0 as u32) << 8) | (protocol.0 as u32))
     }
 
     #[inline]
-    pub const fn base(&self) -> UsbBaseClass {
+    pub const fn base_class(&self) -> UsbBaseClass {
         UsbBaseClass((self.0 >> 16) as u8)
     }
 
     #[inline]
-    pub const fn sub(&self) -> UsbSubClass {
+    pub const fn sub_class(&self) -> UsbSubClass {
         UsbSubClass((self.0 >> 8) as u8)
     }
 
@@ -215,7 +217,7 @@ impl UsbClass {
             .or_else(|| {
                 base_class_entries
                     .iter()
-                    .find(|v| (v.0 & bitmap) != 0 && v.1 == self.base())
+                    .find(|v| (v.0 & bitmap) != 0 && v.1 == self.base_class())
                     .map(|v| v.2)
             })
     }
@@ -275,6 +277,32 @@ pub struct UsbInterfaceNumber(pub u8);
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UsbAlternateSettingNumber(pub u8);
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UsbLength(pub u16);
+
+impl UsbLength {
+    #[inline]
+    pub const fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    #[inline]
+    pub const fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+
+    #[inline]
+    pub const fn zero() -> Self {
+        Self(0)
+    }
+}
 
 /// USB Descriptor type
 #[repr(u8)]
@@ -354,6 +382,10 @@ pub unsafe trait UsbDescriptor: Sized {
 
     #[inline]
     fn from_slice(slice: &[u8]) -> Option<&Self> {
+        // minimal valid usb descriptor is greater than 2
+        if slice.len() < 2 {
+            return None;
+        }
         let temp = unsafe { &*(slice.as_ptr() as *const Self) };
         (temp.len() <= slice.len() && temp.descriptor_type() == Self::DESCRIPTOR_TYPE).then(|| temp)
     }
@@ -474,8 +506,8 @@ unsafe impl UsbDescriptor for UsbConfigurationDescriptor {
 
 impl UsbConfigurationDescriptor {
     #[inline]
-    pub const fn total_length(&self) -> usize {
-        self.wTotalLength.as_u16() as usize
+    pub const fn total_length(&self) -> UsbLength {
+        self.wTotalLength.as_length()
     }
 
     #[inline]
@@ -603,8 +635,8 @@ impl UsbEndpointDescriptor {
     }
 
     #[inline]
-    pub const fn max_packet_size(&self) -> u16 {
-        self.wMaxPacketSize.as_u16()
+    pub const fn max_packet_size(&self) -> UsbLength {
+        UsbLength(self.wMaxPacketSize.as_u16())
     }
 
     #[inline]
@@ -691,8 +723,8 @@ unsafe impl UsbDescriptor for UsbBinaryObjectStoreDescriptor {
 
 impl UsbBinaryObjectStoreDescriptor {
     #[inline]
-    pub const fn total_length(&self) -> usize {
-        self.wTotalLength.as_u16() as usize
+    pub const fn total_length(&self) -> UsbLength {
+        self.wTotalLength.as_length()
     }
 
     #[inline]
@@ -793,7 +825,7 @@ impl UsbHidClassDescriptor {
     }
 
     #[inline]
-    pub fn children<'a>(&'a self) -> impl Iterator<Item = (UsbDescriptorType, usize)> + 'a {
+    pub fn children<'a>(&'a self) -> impl Iterator<Item = (UsbDescriptorType, UsbLength)> + 'a {
         UsbHidClassDescriptorIter {
             base: self,
             index: 0,
@@ -807,18 +839,17 @@ struct UsbHidClassDescriptorIter<'a> {
 }
 
 impl Iterator for UsbHidClassDescriptorIter<'_> {
-    type Item = (UsbDescriptorType, usize);
+    type Item = (UsbDescriptorType, UsbLength);
 
     fn next(&mut self) -> Option<Self::Item> {
         unsafe {
             if self.index < self.base.num_descriptors() {
-                let p = self.base as *const _ as *const u8;
-                let offset = self.index * 3 + 6;
-                let p = p.add(offset);
-                let ty = UsbDescriptorType::from_u8(p.read());
-                let len = (p.add(1).read() as u16) + (p.add(2).read() as u16 * 256);
+                type Struct = (UsbDescriptorType, UsbWord);
+                let offset = self.index + 2;
+                let p = (self.base as *const _ as *const Struct).add(offset);
+                let (ty, len) = p.read();
                 self.index += 1;
-                Some((ty, len as usize))
+                Some((ty, len.as_length()))
             } else {
                 None
             }
@@ -1031,7 +1062,7 @@ pub struct UsbControlSetupData {
     pub bRequest: UsbControlRequest,
     pub wValue: u16,
     pub wIndex: u16,
-    pub wLength: u16,
+    pub wLength: UsbLength,
 }
 
 impl UsbControlSetupData {
@@ -1045,7 +1076,7 @@ impl UsbControlSetupData {
             bRequest: request,
             wValue: 0,
             wIndex: 0,
-            wLength: 0,
+            wLength: UsbLength(0),
         }
     }
 
@@ -1067,7 +1098,7 @@ impl UsbControlSetupData {
     }
 
     #[inline]
-    pub const fn length(mut self, length: u16) -> Self {
+    pub const fn length(mut self, length: UsbLength) -> Self {
         self.wLength = length;
         self
     }
@@ -1077,11 +1108,11 @@ impl UsbControlSetupData {
         request_type: UsbControlRequestBitmap,
         desc_type: UsbDescriptorType,
         index: u8,
-        size: usize,
+        size: UsbLength,
     ) -> Self {
         Self::request(request_type, UsbControlRequest::GET_DESCRIPTOR)
             .value((desc_type as u16) << 8 | index as u16)
-            .length(size as u16)
+            .length(size)
     }
 }
 
@@ -1121,6 +1152,7 @@ impl UsbControlRequestBitmap {
 }
 
 #[repr(u8)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UsbControlRequestType {
     Standard = 0,
@@ -1129,6 +1161,7 @@ pub enum UsbControlRequestType {
 }
 
 #[repr(u8)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UsbControlRequestTarget {
     Device = 0,
@@ -1163,6 +1196,7 @@ impl UsbControlRequest {
 
 #[repr(u16)]
 #[allow(non_camel_case_types)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UsbDeviceFeatureSel {
     DEVICE_REMOTE_WAKEUP = 1,
@@ -1194,11 +1228,11 @@ pub enum PSIV {
 
 impl PSIV {
     #[inline]
-    pub const fn max_packet_size(&self) -> usize {
+    pub const fn max_packet_size(&self) -> UsbLength {
         match self {
-            PSIV::FS | PSIV::LS => 8,
-            PSIV::HS => 64,
-            _ => 512,
+            PSIV::FS | PSIV::LS => UsbLength(8),
+            PSIV::HS => UsbLength(64),
+            _ => UsbLength(512),
         }
     }
 
@@ -1302,19 +1336,4 @@ impl UsbEndpointType {
             _ => unreachable!(),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum UsbError {
-    General,
-    Unsupported,
-    ControllerError(usize),
-    InvalidParameter,
-    InvalidDescriptor,
-    UnexpectedToken,
-    Aborted,
-    Stall,
-    ShortPacket,
-    UsbTransactionError,
-    OutOfMemory,
 }

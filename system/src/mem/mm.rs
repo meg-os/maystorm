@@ -1,29 +1,20 @@
-use super::{fixedvec::FixedVec, slab::*};
-use crate::{
-    arch::page::*,
-    sync::{fifo::EventQueue, semaphore::Semaphore, spinlock::SpinMutex},
-    system::System,
-    task::scheduler::*,
-    *,
-};
-use alloc::{boxed::Box, sync::Arc};
+use super::fixedvec::FixedVec;
+use super::slab::*;
+use crate::arch::page::*;
+use crate::sync::{fifo::EventQueue, semaphore::Semaphore, spinlock::SpinMutex};
+use crate::system::System;
+use crate::task::scheduler::*;
+use crate::*;
 use bootprot::*;
-use core::{
-    alloc::Layout,
-    cell::UnsafeCell,
-    ffi::c_void,
-    fmt::Write,
-    mem::MaybeUninit,
-    mem::{size_of, transmute},
-    num::*,
-    slice,
-    sync::atomic::*,
-};
-use megstd::String;
+use core::alloc::Layout;
+use core::cell::UnsafeCell;
+use core::ffi::c_void;
+use core::mem::{size_of, transmute, MaybeUninit};
+use core::num::*;
+use core::slice;
+use core::sync::atomic::*;
 
 static mut MM: UnsafeCell<MemoryManager> = UnsafeCell::new(MemoryManager::new());
-
-static LAST_ALLOC_PTR: AtomicUsize = AtomicUsize::new(0);
 
 /// Memory Manager
 pub struct MemoryManager {
@@ -96,7 +87,9 @@ impl MemoryManager {
 
     pub unsafe fn init_second() {
         PageManager::init_late();
-        SpawnOption::with_priority(Priority::Realtime).start(Self::_page_thread, 0, "Page Manager");
+        SpawnOption::with_priority(Priority::Realtime)
+            .start(Self::_page_thread, 0, "Page Manager")
+            .unwrap();
     }
 
     fn _page_thread(_args: usize) {
@@ -186,20 +179,41 @@ impl MemoryManager {
 
         let mut list = shared.mem_list.lock();
         shared.n_fragments.store(list.len(), Ordering::Release);
+        let mut needs_append = true;
         for pair in list.as_slice() {
             if pair.try_merge(new_entry).is_ok() {
-                return;
+                needs_append = false;
+                break;
             }
         }
-        match list.push(new_entry) {
-            Ok(_) => {
-                drop(list);
-                return;
-            }
-            Err(_) => {
-                shared.lost_size.fetch_add(size, Ordering::SeqCst);
+        if needs_append {
+            match list.push(new_entry) {
+                Ok(_) => (),
+                Err(_) => {
+                    shared.lost_size.fetch_add(size, Ordering::SeqCst);
+                }
             }
         }
+
+        list.sort_by(|a, b| {
+            if a.size() > 0 && b.size() > 0 {
+                a.base().cmp(&b.base())
+            } else {
+                b.size().cmp(&a.size())
+            }
+        });
+
+        loop {
+            let Some(last) = list.last() else {
+                break;
+            };
+            if last.size() > 0 {
+                break;
+            }
+            list.pop();
+        }
+
+        drop(list);
     }
 
     #[must_use]
@@ -239,15 +253,6 @@ impl MemoryManager {
     pub unsafe fn zalloc2(layout: Layout) -> Option<NonZeroUsize> {
         Self::pg_alloc(layout)
             .and_then(|v| NonZeroUsize::new(v.get().direct_map::<c_void>() as usize))
-            .map(|v| {
-                LAST_ALLOC_PTR.store(v.get(), core::sync::atomic::Ordering::SeqCst);
-                v
-            })
-    }
-
-    #[inline]
-    pub fn last_alloc_ptr() -> usize {
-        LAST_ALLOC_PTR.load(core::sync::atomic::Ordering::Relaxed)
     }
 
     /// Deallocate kernel memory
@@ -256,7 +261,8 @@ impl MemoryManager {
         layout: Layout,
     ) -> Result<(), DeallocationError> {
         if let Some(base) = base {
-            (base.get() as *mut u8).write_bytes(0xCC, layout.size());
+            let base_ptr = base.get() as *mut u8;
+            base_ptr.write_bytes(0xCC, layout.size());
 
             let shared = Self::shared();
             if let Some(slab) = &shared.slab {
@@ -264,8 +270,10 @@ impl MemoryManager {
                     return Ok(());
                 }
             }
-            Self::pg_dealloc(PhysicalAddress::direct_unmap(base.get()), layout);
-            Ok(())
+
+            PhysicalAddress::direct_unmap(base_ptr)
+                .map(|v| Self::pg_dealloc(v, layout))
+                .ok_or(DeallocationError::InvalidArgument)
         } else {
             Ok(())
         }
@@ -277,10 +285,8 @@ impl MemoryManager {
         let max_real = 0xA0;
         let shared = Self::shared();
         for i in 1..max_real {
-            let result = Hal::sync().fetch_reset(
-                &*(&shared.real_bitmap[0] as *const _ as *const AtomicUsize),
-                i,
-            );
+            let result =
+                Hal::sync().fetch_reset(&*(shared.real_bitmap.as_ptr() as *const AtomicUsize), i);
             if result {
                 return NonZeroU8::new(i as u8);
             }
@@ -290,18 +296,27 @@ impl MemoryManager {
 
     pub fn statistics(sb: &mut String) {
         let shared = Self::shared();
+        sb.reserve(4096);
 
         let lost_size = shared.lost_size.load(Ordering::Relaxed);
         let n_fragments = shared.n_fragments.load(Ordering::Relaxed);
         let total = shared.free_pages.load(Ordering::Relaxed);
 
+        let mut max_free_area = 0;
+        let list = shared.mem_list.lock();
+        for pair in list.as_slice() {
+            max_free_area = max_free_area.max(pair.size());
+        }
+        drop(list);
+
         writeln!(
             sb,
-            "Total {} MB, Free Pages {}, Fragments {}, Lost {} MB",
+            "Total {} MB, Free Pages {}, Fragments {}, Max Free {} MB, Lost {} MB",
             System::current_device().total_memory_size() >> 20,
             total / Self::PAGE_SIZE_MIN,
             n_fragments,
-            (lost_size >> 20),
+            max_free_area >> 20,
+            ((lost_size + 0xFFFFF) >> 20),
         )
         .unwrap();
 
@@ -312,6 +327,25 @@ impl MemoryManager {
             }
             writeln!(sb, "").unwrap();
         }
+    }
+
+    pub fn get_memory_map(sb: &mut String) {
+        let shared = Self::shared();
+        sb.reserve(4096);
+
+        let list = shared.mem_list.lock();
+        for (index, pair) in list.as_slice().iter().enumerate() {
+            writeln!(
+                sb,
+                "MEM: {:2} {:08x}-{:08x} ({:08x})",
+                index,
+                pair.base(),
+                pair.base() + pair.size(),
+                pair.size(),
+            )
+            .unwrap();
+        }
+        drop(list);
     }
 }
 
@@ -352,7 +386,7 @@ impl MemFreePair {
     }
 
     #[inline]
-    fn split(data: u64) -> (PhysicalAddress, usize) {
+    fn _split(data: u64) -> (PhysicalAddress, usize) {
         (
             PhysicalAddress::new(data & 0xFFFF_FFFF),
             (data >> 32) as usize,
@@ -361,23 +395,25 @@ impl MemFreePair {
 
     #[inline]
     pub fn base(&self) -> PhysicalAddress {
-        Self::split(self.raw()).0 * Self::PAGE_SIZE
+        Self::_split(self.raw()).0 * Self::PAGE_SIZE
     }
 
     #[inline]
     pub fn size(&self) -> usize {
-        Self::split(self.raw()).1 * Self::PAGE_SIZE
+        Self::_split(self.raw()).1 * Self::PAGE_SIZE
     }
 
     #[inline]
     pub fn try_merge(&self, other: Self) -> Result<(), ()> {
         let p = self.inner();
         p.fetch_update(Ordering::SeqCst, Ordering::Relaxed, |data| {
-            let (base0, size0) = Self::split(data);
-            let (base1, size1) = Self::split(other.raw());
-            if base0 + size0 == base1 {
+            let (base0, size0) = Self::_split(data);
+            let (base1, size1) = Self::_split(other.raw());
+            let end0 = base0 + size0;
+            let end1 = base1 + size1;
+            if end0 == base1 {
                 Some((base0.as_u64()) | (((size0 + size1) as u64) << 32))
-            } else if base1 + size1 == base0 {
+            } else if end1 == base0 {
                 Some((base1.as_u64()) | (((size0 + size1) as u64) << 32))
             } else {
                 None
@@ -392,7 +428,7 @@ impl MemFreePair {
         let size = (size + Self::PAGE_SIZE - 1) / Self::PAGE_SIZE;
         let p = self.inner();
         p.fetch_update(Ordering::SeqCst, Ordering::Relaxed, |data| {
-            let (base, limit) = Self::split(data);
+            let (base, limit) = Self::_split(data);
             if limit < size {
                 return None;
             }
@@ -400,7 +436,7 @@ impl MemFreePair {
             let new_data = ((base + size).as_u64()) | ((new_size as u64) << 32);
             Some(new_data)
         })
-        .map(|data| Self::split(data).0 * Self::PAGE_SIZE)
+        .map(|data| Self::_split(data).0 * Self::PAGE_SIZE)
         .map_err(|_| ())
     }
 }

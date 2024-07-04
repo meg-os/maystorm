@@ -1,5 +1,7 @@
 //! Executable and Linking Format
 
+use core::ops::BitOr;
+
 pub const EI_NIDENT: usize = 16;
 pub const EI_CLASS: usize = 4;
 pub const EI_DATA: usize = 5;
@@ -174,6 +176,45 @@ pub const ET_CORE: ElfType = ElfType(4);
 pub const ET_LOPROC: ElfType = ElfType(0xFF00);
 pub const ET_HIPROC: ElfType = ElfType(0xFFFF);
 
+pub const PF_X: SegmentFlags = SegmentFlags(1);
+pub const PF_W: SegmentFlags = SegmentFlags(2);
+pub const PF_R: SegmentFlags = SegmentFlags(4);
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SegmentFlags(pub u32);
+
+impl SegmentFlags {
+    pub const READ: Self = Self(4);
+    pub const WRITE: Self = Self(2);
+    pub const EXEC: Self = Self(1);
+    pub const RWX: Self = Self(Self::READ.bits() | Self::WRITE.bits() | Self::EXEC.bits());
+
+    #[inline]
+    pub const fn from_bits_truncate(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    #[inline]
+    pub const fn bits(&self) -> u32 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn contains(&self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+impl BitOr<Self> for SegmentFlags {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
 pub mod elf32 {
     use super::*;
 
@@ -220,7 +261,7 @@ pub mod elf32 {
         pub p_paddr: ElfAddr,
         pub p_filesz: ElfWord,
         pub p_memsz: ElfWord,
-        pub p_flags: ElfWord,
+        pub p_flags: SegmentFlags,
         pub p_align: ElfWord,
     }
 }
@@ -266,7 +307,7 @@ pub mod elf64 {
     #[derive(Debug, Clone, Copy)]
     pub struct ProgramHeader {
         pub p_type: SegmentType,
-        pub p_flags: ElfWord,
+        pub p_flags: SegmentFlags,
         pub p_offset: ElfOff,
         pub p_vaddr: ElfAddr,
         pub p_paddr: ElfAddr,

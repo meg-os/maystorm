@@ -1,7 +1,9 @@
 [build]
-rustflags = ["-C", "relocation-model=static", "-C", "link-args=--image-base=0xffffffff80000000 -z separate-code"]
+rustflags = [
+    "-C", "relocation-model=static",
+    "-C", "link-args=--image-base=0xffffffff80100000 -z separate-code",
+]
 target = "x86_64-unknown-none.json"
-# "-C", "lto", 
 
 [unstable]
 build-std = ["core", "compiler_builtins", "alloc"]

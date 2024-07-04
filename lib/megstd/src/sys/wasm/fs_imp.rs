@@ -1,7 +1,11 @@
 // FileSystem Implementation
 
 use super::syscall::*;
-use crate::{fs::*, io::Result, path::*, sys::fcntl::*, *};
+use crate::fs::*;
+use crate::io::Result;
+use crate::path::*;
+use crate::prelude::*;
+use crate::sys::fcntl::*;
 
 pub struct File {
     _phantom: (),

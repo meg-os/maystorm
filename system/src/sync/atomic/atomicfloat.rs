@@ -7,7 +7,7 @@ pub type FloatType = f64;
 type InnerType = u64;
 type InnerAtomicType = AtomicU64;
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Default)]
 pub struct AtomicFloat {
     inner: InnerAtomicType,

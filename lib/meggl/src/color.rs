@@ -1,14 +1,14 @@
-use core::{
-    fmt,
-    mem::transmute,
-    ops::{Add, AddAssign, Sub, SubAssign},
-};
+use crate::vec::{Vec3, Vec4};
+use crate::*;
+use core::fmt;
+use core::mem::transmute;
+use core::ops::{Add, AddAssign, Sub, SubAssign};
 
 /// Common color trait
 pub trait PixelColor: Sized + Copy + Clone + PartialEq + Eq + Default {
     /// This value is used to calculate the address of a raster image that supports this color format.
     #[inline]
-    fn stride_for(width: isize) -> usize {
+    fn stride_for(width: GlUInt) -> usize {
         width as usize
     }
 }
@@ -179,7 +179,7 @@ impl From<IndexedColor> for ARGB8888 {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Alpha8(pub u8);
+pub struct Alpha8(u8);
 
 impl PixelColor for Alpha8 {}
 
@@ -201,35 +201,38 @@ impl Alpha8 {
     pub const OPAQUE: Self = Self(u8::MAX);
 
     #[inline]
-    pub const fn into_f32(self) -> f32 {
+    pub const fn new(value: u8) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub const fn as_u8(&self) -> u8 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
+
+    #[inline]
+    pub fn into_f32(self) -> f32 {
         self.0 as f32 / Self::OPAQUE.0 as f32
     }
 
     #[inline]
-    pub const fn into_f64(self) -> f64 {
+    pub fn into_f64(self) -> f64 {
         self.0 as f64 / Self::OPAQUE.0 as f64
     }
 
     #[inline]
-    pub const fn from_f32(value: f32) -> Self {
-        if value >= 1.0 {
-            Self::OPAQUE
-        } else if value > 0.0 {
-            Self((value * Self::OPAQUE.0 as f32) as u8)
-        } else {
-            Self::TRANSPARENT
-        }
+    pub fn from_f32(value: f32) -> Self {
+        Self((value * 255.0).clamp(0.0, 255.0) as u8)
     }
 
     #[inline]
-    pub const fn from_f64(value: f64) -> Self {
-        if value >= 1.0 {
-            Self::OPAQUE
-        } else if value > 0.0 {
-            Self((value * Self::OPAQUE.0 as f64) as u8)
-        } else {
-            Self::TRANSPARENT
-        }
+    pub fn from_f64(value: f64) -> Self {
+        Self((value * 255.0).clamp(0.0, 255.0) as u8)
     }
 
     #[inline]
@@ -371,7 +374,7 @@ pub type TrueColor = ARGB8888;
 /// 32bit TrueColor
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub struct ARGB8888(pub u32);
+pub struct ARGB8888(u32);
 
 impl PixelColor for ARGB8888 {}
 
@@ -464,7 +467,7 @@ impl ARGB8888 {
 
     #[inline]
     pub const fn opacity(&self) -> Alpha8 {
-        Alpha8((self.0 >> 24) as u8)
+        ColorComponents::from_true_color(*self).a
     }
 
     #[inline]
@@ -472,15 +475,6 @@ impl ARGB8888 {
         let mut components = self.components();
         components.a = alpha;
         components.into_true_color()
-    }
-
-    #[inline]
-    pub fn blending<F1, F2>(&self, rhs: Self, f_rgb: F1, f_a: F2) -> Self
-    where
-        F1: Fn(u8, u8) -> u8,
-        F2: Fn(Alpha8, Alpha8) -> Alpha8,
-    {
-        self.components().blending(rhs.into(), f_rgb, f_a).into()
     }
 
     #[inline]
@@ -493,28 +487,37 @@ impl ARGB8888 {
         Self(argb)
     }
 
-    #[inline]
-    pub fn blend_draw(&self, rhs: Self) -> Self {
-        if rhs.is_opaque() {
+    pub fn blending(&self, rhs: Self) -> Self {
+        let rhs_ = rhs.components();
+        if rhs_.a.is_opaque() {
             return rhs;
-        } else if rhs.is_transparent() {
+        }
+        if rhs_.a.is_transparent() {
             return *self;
         }
-        let rhs = rhs.components();
-        let lhs = self.components();
-        let alpha_r = rhs.a.0 as usize;
-        let alpha_l = lhs.a.0 as usize * (256 - alpha_r) / 256;
+        let lhs_ = self.components();
+        let alpha_r = rhs_.a.0 as usize;
+        let alpha_l = lhs_.a.0 as usize * (256 - alpha_r) / 256;
         let alpha_s = alpha_r + alpha_l;
-        if alpha_s > 0 {
-            lhs.blending(
-                rhs,
-                |l, r| ((l as usize * alpha_l + r as usize * alpha_r) / alpha_s) as u8,
-                |_, _| Alpha8(alpha_s as u8),
-            )
-            .into()
-        } else {
-            Self::TRANSPARENT
-        }
+        let alpha_ls = (alpha_l * 256).checked_div(alpha_s).unwrap_or(0) as u32;
+        let alpha_rs = (alpha_r * 256).checked_div(alpha_s).unwrap_or(0) as u32;
+
+        let l_rb = self.0 & 0xFF00FF;
+        let l_g = self.0 & 0x00FF00;
+        let r_rb = rhs.0 & 0xFF00FF;
+        let r_g = rhs.0 & 0x00FF00;
+
+        Self(
+            (((((l_rb * alpha_ls) + (r_rb * alpha_rs)) & 0xFF00FF00)
+                + (((l_g * alpha_ls) + (r_g * alpha_rs)) & 0x00FF0000))
+                >> 8)
+                + ((alpha_s as u32) << 24),
+        )
+    }
+
+    #[inline]
+    pub fn blend(&mut self, rhs: Self) {
+        *self = self.blending(rhs);
     }
 
     #[inline]
@@ -539,6 +542,46 @@ impl From<ARGB8888> for IndexedColor {
     #[inline]
     fn from(color: ARGB8888) -> Self {
         Self::from_rgb(color.rgb())
+    }
+}
+
+impl From<Vec3<u8>> for ARGB8888 {
+    #[inline]
+    fn from(value: Vec3<u8>) -> Self {
+        ColorComponents::from_rgb(value.x, value.y, value.z).into_true_color()
+    }
+}
+
+impl From<Vec4<u8>> for ARGB8888 {
+    #[inline]
+    fn from(value: Vec4<u8>) -> Self {
+        ColorComponents::from_rgba(value.x, value.y, value.z, Alpha8::new(value.w))
+            .into_true_color()
+    }
+}
+
+impl From<Vec3<f64>> for ARGB8888 {
+    #[inline]
+    fn from(value: Vec3<f64>) -> Self {
+        ColorComponents::from_rgb(
+            (value.x * 255.99).clamp(0.0, 255.0) as u8,
+            (value.y * 255.99).clamp(0.0, 255.0) as u8,
+            (value.z * 255.99).clamp(0.0, 255.0) as u8,
+        )
+        .into_true_color()
+    }
+}
+
+impl From<Vec4<f64>> for ARGB8888 {
+    #[inline]
+    fn from(value: Vec4<f64>) -> Self {
+        ColorComponents::from_rgba(
+            (value.x * 255.99).clamp(0.0, 255.0) as u8,
+            (value.y * 255.99).clamp(0.0, 255.0) as u8,
+            (value.z * 255.99).clamp(0.0, 255.0) as u8,
+            Alpha8::from_f64(value.w),
+        )
+        .into_true_color()
     }
 }
 
@@ -568,6 +611,16 @@ impl ColorComponents {
     }
 
     #[inline]
+    pub const fn into_array(self) -> [u8; 4] {
+        unsafe { transmute(self) }
+    }
+
+    #[inline]
+    pub const fn from_array(value: [u8; 4]) -> Self {
+        unsafe { transmute(value) }
+    }
+
+    #[inline]
     #[cfg(target_endian = "little")]
     pub const fn from_true_color(val: ARGB8888) -> Self {
         unsafe { transmute(val) }
@@ -577,20 +630,6 @@ impl ColorComponents {
     #[cfg(target_endian = "little")]
     pub const fn into_true_color(self) -> ARGB8888 {
         unsafe { transmute(self) }
-    }
-
-    #[inline]
-    pub fn blending<F1, F2>(self, rhs: Self, f_rgb: F1, f_a: F2) -> Self
-    where
-        F1: Fn(u8, u8) -> u8,
-        F2: Fn(Alpha8, Alpha8) -> Alpha8,
-    {
-        Self {
-            a: f_a(self.a, rhs.a),
-            r: f_rgb(self.r, rhs.r),
-            g: f_rgb(self.g, rhs.g),
-            b: f_rgb(self.b, rhs.b),
-        }
     }
 
     #[inline]
@@ -628,10 +667,24 @@ impl Into<u32> for ColorComponents {
     }
 }
 
+impl From<[u8; 4]> for ColorComponents {
+    #[inline]
+    fn from(value: [u8; 4]) -> Self {
+        ColorComponents::from_array(value)
+    }
+}
+
+impl From<ColorComponents> for [u8; 4] {
+    #[inline]
+    fn from(value: ColorComponents) -> Self {
+        value.into_array()
+    }
+}
+
 /// 32bit Color (RGBA 8888)
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub struct RGBA8888(pub(super) u32);
+pub struct RGBA8888(pub(crate) u32);
 
 impl PixelColor for RGBA8888 {}
 
@@ -941,7 +994,7 @@ impl From<ARGB8888> for Color {
 /// The [PackedColor] type is convertible to the [Color] type and each other, with some exceptions.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct PackedColor(pub u32);
+pub struct PackedColor(u32);
 
 impl PixelColor for PackedColor {}
 
@@ -994,6 +1047,16 @@ impl PackedColor {
     pub const LIGHT_MAGENTA: Self = Self::from_indexed(IndexedColor::LIGHT_MAGENTA);
     pub const YELLOW: Self = Self::from_indexed(IndexedColor::YELLOW);
     pub const WHITE: Self = Self::from_indexed(IndexedColor::WHITE);
+
+    #[inline]
+    pub const fn from_raw(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    #[inline]
+    pub const fn into_raw(self) -> u32 {
+        self.0
+    }
 
     #[inline]
     pub const fn from_argb(argb: u32) -> Self {
@@ -1083,7 +1146,7 @@ impl From<PackedColor> for Color {
 /// 15bit High Color (RGB 555)
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct RGB555(pub u16);
+pub struct RGB555(pub(crate) u16);
 
 impl PixelColor for RGB555 {}
 
@@ -1176,7 +1239,7 @@ impl From<RGB555> for Color {
 /// 16bit High Color (RGB 565)
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct RGB565(pub u16);
+pub struct RGB565(u16);
 
 impl PixelColor for RGB565 {}
 
@@ -1294,7 +1357,7 @@ pub enum IndexedColor4 {
 
 impl PixelColor for IndexedColor4 {
     #[inline]
-    fn stride_for(width: isize) -> usize {
+    fn stride_for(width: GlUInt) -> usize {
         (width as usize + 1) / 2
     }
 }
@@ -1389,8 +1452,8 @@ pub enum Monochrome {
 
 impl PixelColor for Monochrome {
     #[inline]
-    fn stride_for(width: isize) -> usize {
-        (width as usize + 7) / 8
+    fn stride_for(width: GlUInt) -> usize {
+        (width as usize + 7) >> 3
     }
 }
 
@@ -1415,8 +1478,8 @@ impl Monochrome {
     #[inline]
     pub const fn into_bool(self) -> bool {
         match self {
-            Self::Zero => false,
-            Self::One => true,
+            Monochrome::Zero => false,
+            Monochrome::One => true,
         }
     }
 }
@@ -1424,7 +1487,20 @@ impl Monochrome {
 impl From<Monochrome> for u8 {
     #[inline]
     fn from(value: Monochrome) -> Self {
-        value.into_bool() as u8
+        match value {
+            Monochrome::Zero => 0,
+            Monochrome::One => 1,
+        }
+    }
+}
+
+impl From<Monochrome> for usize {
+    #[inline]
+    fn from(value: Monochrome) -> Self {
+        match value {
+            Monochrome::Zero => 0,
+            Monochrome::One => 1,
+        }
     }
 }
 
@@ -1473,13 +1549,13 @@ impl Octet {
 
     #[inline]
     pub fn get(&self, at: usize) -> Monochrome {
-        Monochrome::new(self.0 & (0x80u8 >> at))
+        Monochrome::new(self.0 & (0x80u8.wrapping_shr(at as u32)))
     }
 
     #[inline]
     pub fn set(&mut self, at: usize, value: Monochrome) {
-        let mask = 0x80u8 >> at;
-        if value.into_bool() {
+        let mask = 0x80u8.wrapping_shr(at as u32);
+        if value == Monochrome::One {
             self.0 |= mask;
         } else {
             self.0 &= !mask;

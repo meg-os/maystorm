@@ -1,10 +1,11 @@
 //! Kernel Invocation for x86-64
 
 use super::*;
-use core::{
-    arch::{asm, global_asm, x86_64::__cpuid},
-    ffi::c_void,
-};
+use core::arch::{asm, global_asm};
+use core::ffi::c_void;
+use x86::cpuid::*;
+use x86::efer::EFER;
+use x86::msr::MSR;
 
 pub struct Invocation();
 
@@ -28,60 +29,34 @@ _end_invoke_kernel_stub:
 );
 
 impl Invocation {
-    const IA32_EFER_MSR: u32 = 0xC000_0080;
-    const IA32_MISC_ENABLE_MSR: u32 = 0x0000_01A0;
-
     #[inline]
     pub const fn new() -> Self {
         Self()
     }
-
-    #[inline]
-    fn is_intel_processor(&self) -> bool {
-        let cpuid = unsafe { __cpuid(0) };
-        // GenuineIntel
-        cpuid.ebx == 0x756e6547 && cpuid.edx == 0x49656e69 && cpuid.ecx == 0x6c65746e
-    }
 }
 
 impl Invoke for Invocation {
+    const INCOMPATIBILITY_MESSAGE: &str = "The Operating System you are attempting to launch requires an IvyBridge or later processor.";
+
+    #[inline]
     fn is_compatible(&self) -> bool {
-        let cpuid = unsafe { __cpuid(0x8000_0001) };
-        // RDTSCP
-        if cpuid.edx & (1 << 27) == 0 {
-            return false;
-        }
-        return true;
+        Feature::RDTSCP.exists()
     }
 
     unsafe fn invoke_kernel(
         &self,
-        info: &BootInfo,
+        info: BootInfo,
         entry: VirtualAddress,
         new_sp: VirtualAddress,
     ) -> ! {
         unsafe {
             // For Intel processors, unlock NXE disable. (ex: Surface 3)
-            if self.is_intel_processor() {
-                asm!("
-                    rdmsr
-                    btr edx, 2
-                    wrmsr
-                    ",in("ecx") Self::IA32_MISC_ENABLE_MSR,
-                    out("eax")_,
-                    out("edx") _,
-                );
+            if is_intel_processor() {
+                MSR::IA32_MISC_ENABLE.bit_clear(2);
             }
 
             // Enable NXE
-            asm!("
-                rdmsr
-                bts eax, 11
-                wrmsr
-                ", in("ecx") Self::IA32_EFER_MSR,
-                out("eax") _,
-                out("edx") _,
-            );
+            EFER::NXE.enable();
 
             // Jump to Trampoline Code to avoid problems over 4GB
             let base = _invoke_kernel_stub as usize;
@@ -93,11 +68,11 @@ impl Invoke for Invocation {
             asm!(
                 "jmp rax",
                 in("rax") kernel_stub,
-                in("rcx") info,
+                in("rcx") &info,
                 in("rdx") 0,
                 in("rsi") 0,
-                in("rdi") info,
-                in("r8") info.master_cr3,
+                in("rdi") &info,
+                in("r8") info.master_page_table,
                 in("r9") entry.0,
                 in("r10") new_sp.0,
                 options(noreturn)

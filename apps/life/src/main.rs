@@ -1,14 +1,17 @@
+//! Conway's Game of Life
+
 #![no_main]
 #![no_std]
 
-use megstd::{drawing::Monochrome, sys::syscall::*, window::*};
+use megstd::sys::syscall::*;
+use megstd::window::*;
 
 const BG_COLOR: WindowColor = WindowColor::BLACK;
 const FG_COLOR: WindowColor = WindowColor::YELLOW;
-const DRAW_SCALE: isize = 2;
-const BITMAP_WIDTH: isize = 64;
-const BITMAP_HEIGHT: isize = 64;
-const SIZE_BITMAP: usize = (BITMAP_HEIGHT * BITMAP_WIDTH / 8) as usize;
+const DRAW_SCALE: u32 = 2;
+const BITMAP_WIDTH: u32 = 64;
+const BITMAP_HEIGHT: u32 = 64;
+const SIZE_BITMAP: usize = (BITMAP_HEIGHT as usize * BITMAP_WIDTH as usize / 8) as usize;
 
 #[no_mangle]
 fn _start() {
@@ -20,6 +23,7 @@ fn _start() {
             BITMAP_HEIGHT * DRAW_SCALE,
         ))
         .bg_color(BG_COLOR)
+        .max_fps(10)
         .build("LIFE");
 
     let mut curr_data = [0u8; SIZE_BITMAP];
@@ -42,11 +46,9 @@ fn _start() {
             ctx.blt1(&current, Point::new(0, 0), FG_COLOR, DRAW_SCALE as usize);
         });
 
-        let w = BITMAP_WIDTH - 1;
-        let h = BITMAP_HEIGHT - 1;
-        for y in 1..h {
-            for x in 1..w {
-                let center = Point::new(x, y);
+        for y in 1..(BITMAP_HEIGHT - 1) {
+            for x in 1..(BITMAP_WIDTH - 1) {
+                let center = Point::new(x as i32, y as i32);
                 let life = unsafe { current.get_pixel_unchecked(center) };
 
                 let count = [
@@ -61,33 +63,23 @@ fn _start() {
                 ]
                 .iter()
                 .fold(0, |acc, coords| {
-                    if unsafe {
+                    acc + usize::from(unsafe {
                         current.get_pixel_unchecked(Point::new(
                             center.x + coords.0,
                             center.y + coords.1,
                         ))
-                    }
-                    .into_bool()
-                    {
-                        acc + 1
-                    } else {
-                        acc
-                    }
+                    })
                 });
 
-                let next_life = if life.into_bool() {
-                    if count <= 1 || count >= 4 {
-                        Monochrome::Zero
-                    } else {
-                        life
-                    }
-                } else {
-                    if count == 3 {
-                        Monochrome::One
-                    } else {
-                        life
-                    }
+                // game rules
+                let next_life = match count {
+                    3 => Monochrome::One,
+                    _ => match count {
+                        2 | 3 => life,
+                        _ => Monochrome::Zero,
+                    },
                 };
+
                 unsafe {
                     next.set_pixel_unchecked(center, next_life);
                 }

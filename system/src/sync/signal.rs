@@ -29,13 +29,13 @@ impl SignallingObject {
     }
 
     #[inline]
-    const fn _into_t(val: usize) -> Option<ThreadHandle> {
+    const unsafe fn _into_t(val: usize) -> Option<ThreadHandle> {
         ThreadHandle::new(val)
     }
 
     #[inline]
     pub fn take(&self) -> Option<ThreadHandle> {
-        Self::_into_t(self.data.swap(0, Ordering::SeqCst))
+        unsafe { Self::_into_t(self.data.swap(0, Ordering::SeqCst)) }
     }
 
     #[inline]
@@ -50,8 +50,8 @@ impl SignallingObject {
             Ordering::SeqCst,
             Ordering::Relaxed,
         ) {
-            Ok(v) => Ok(Self::_into_t(v)),
-            Err(v) => Err(Self::_into_t(v)),
+            Ok(v) => Ok(unsafe { Self::_into_t(v) }),
+            Err(v) => Err(unsafe { Self::_into_t(v) }),
         }
     }
 
@@ -65,20 +65,18 @@ impl SignallingObject {
         loop {
             if f() {
                 return;
-            } else {
-                let mut delta = 0;
-                loop {
-                    if self.sleep().is_ok() {
-                        if f() {
-                            return;
-                        }
-                        break;
-                    } else {
-                        Timer::sleep(Duration::from_millis(1 << delta));
+            }
+            let mut delta = 0;
+            loop {
+                if self.sleep().is_ok() {
+                    if f() {
+                        return;
                     }
-                    if delta < MAX_DELTA {
-                        delta += 1;
-                    }
+                    break;
+                }
+                Timer::sleep(Duration::from_millis(1 << delta));
+                if delta < MAX_DELTA {
+                    delta += 1;
                 }
             }
         }
@@ -86,8 +84,8 @@ impl SignallingObject {
 
     #[inline]
     fn sleep(&self) -> Result<(), ()> {
-        let current = Scheduler::current_thread().unwrap();
-        self.compare_and_swap(None, Some(current))
+        let current = Scheduler::current_thread();
+        self.compare_and_swap(None, current)
             .map(|_| Scheduler::sleep_thread())
             .map_err(|_| ())
     }

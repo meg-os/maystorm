@@ -1,19 +1,15 @@
-//! Haribote-OS Emulator Subsystem
+//! Haribote-OS Emulator Subsystem for Maystorm
 
 use super::*;
-use crate::{
-    arch::cpu::LegacySyscallContext,
-    fs::*,
-    io::audio::{AudioContext, FreqType, NoteControl, NoteOnParams, OscType},
-    mem::MemoryManager,
-    ui::window::*,
-};
-use alloc::{boxed::Box, sync::Arc};
-use core::{alloc::Layout, slice, str, time::Duration};
-use megstd::{
-    drawing::*,
-    io::{hid::Usage, Read},
-};
+use crate::arch::cpu::LegacySyscallContext;
+use crate::io::audio::{AudioContext, FreqType, NoteControl, NoteOnParams, OscType};
+use crate::ui::window::*;
+use core::slice;
+use core::str;
+use core::time::Duration;
+use megstd::drawing::*;
+use megstd::io::hid::Usage;
+use megstd::uuid::identify;
 
 #[allow(dead_code)]
 mod fonts {
@@ -78,6 +74,7 @@ impl HoeManager {
 }
 
 /// Contextual structure of the Haribote-OS Emulator subsystem
+#[identify("012EEE73-5E9A-4701-A214-D36AB5E14B8F")]
 pub struct Hoe {
     context: LegacyAppContext,
     cmdline: String,
@@ -89,12 +86,9 @@ pub struct Hoe {
     lang_mode: HoeLangMode,
     malloc_start: u32,
     malloc_free: u32,
-}
 
-unsafe impl Identify for Hoe {
-    #[rustfmt::skip]
-    /// 012EEE73-5E9A-4701-A214-D36AB5E14B8F
-    const UUID: Uuid = Uuid::from_parts(0x012EEE73, 0x5E9A, 0x4701, 0xA214, [0xD3, 0x6A, 0xB5, 0xE1, 0x4B, 0x8F]);
+    #[allow(dead_code)]
+    app_image: Box<[u8]>,
 }
 
 impl Personality for Hoe {
@@ -111,8 +105,11 @@ impl Personality for Hoe {
 }
 
 impl Hoe {
+    /* b'MYOS' */
     const OS_ID: u32 = 0x534F594D;
+
     const OS_VER: u32 = 0;
+
     const PALETTE: [u32; 256] = [
         0xFF000000, 0xFFFF0000, 0xFF00FF00, 0xFFFFFF00, 0xFF0000FF, 0xFFFF00FF, 0xFF00FFFF,
         0xFFFFFFFF, 0xFFC6C6C6, 0xFF840000, 0xFF008400, 0xFF848400, 0xFF000084, 0xFF840084,
@@ -150,9 +147,10 @@ impl Hoe {
         0xFFFFFFFF, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
 
-    fn new(context: LegacyAppContext, cmdline: String) -> PersonalityContext {
+    fn new(context: LegacyAppContext, app_image: Box<[u8]>, cmdline: String) -> PersonalityContext {
         PersonalityContext::new(Self {
             context,
+            app_image,
             cmdline,
             windows: Vec::new(),
             timers: Vec::new(),
@@ -182,7 +180,7 @@ impl Hoe {
         match regs.edx {
             1 => {
                 // putchar(eax)
-                System::stdout().write_char(regs.eax as u8 as char).unwrap();
+                print!("{}", regs.eax as u8 as char);
             }
             2 => {
                 // putstring(ebx)
@@ -218,7 +216,7 @@ impl Hoe {
                         None => return,
                     };
                     let color = regs.eax as u8;
-                    let origin = Point::new(regs.esi as isize, regs.edi as isize);
+                    let origin = Point::new(regs.esi as i32, regs.edi as i32);
                     {
                         let mut origin = origin;
                         for jc in text.chars(self.lang_mode) {
@@ -278,8 +276,8 @@ impl Hoe {
             13 => {
                 // draw line
                 self.get_window(regs.ebx).map(|(window, refreshing)| {
-                    let c0 = Point::new(regs.eax as isize, regs.ecx as isize);
-                    let c1 = Point::new(regs.esi as isize, regs.edi as isize);
+                    let c0 = Point::new(regs.eax as i32, regs.ecx as i32);
+                    let c1 = Point::new(regs.esi as i32, regs.edi as i32);
                     window.draw_line(self, c0, c1, regs.ebp as u8, refreshing);
                 });
             }
@@ -307,7 +305,7 @@ impl Hoe {
             18 => {
                 // set timer
                 let window = match self.windows.first() {
-                    Some(v) => v.handle,
+                    Some(v) => v.handle.clone(),
                     None => return,
                 };
                 let timer_id = match self.get_timer(regs.ebx) {
@@ -403,6 +401,7 @@ impl Hoe {
             }
             // 30 => {
             //     // void api_osselect(int i);
+            //     // This API is not supported due to architectural differences.
             // }
             // 31 => {
             //     // int api_sendkey(char *);
@@ -579,28 +578,23 @@ impl HrbExecutable {
     const MINIMAL_BIN_SIZE: usize = 0x24;
 }
 
-pub struct HrbBinaryLoader {
-    lio: LoadedImageOption,
-    ctx: LegacyAppContext,
+pub struct HrbBinaryLoader;
+
+impl HrbBinaryLoader {
+    #[inline]
+    pub fn new() -> Box<Self> {
+        unsafe {
+            HoeManager::init();
+        }
+        Box::new(Self {})
+    }
 }
 
 impl HrbBinaryLoader {
-    fn new() -> Self {
-        Self {
-            lio: LoadedImageOption::default(),
-            ctx: LegacyAppContext::default(),
-        }
-    }
-
-    pub fn identity(blob: &[u8]) -> Option<Self> {
-        if blob.len() > HrbExecutable::MINIMAL_BIN_SIZE
+    pub fn identify(blob: &[u8]) -> bool {
+        blob.len() > HrbExecutable::MINIMAL_BIN_SIZE
             && &blob[HrbExecutable::OFFSET_SIGN_1..HrbExecutable::OFFSET_SIGN_2]
                 == HrbExecutable::SIGNATURE
-        {
-            Some(HrbBinaryLoader::new())
-        } else {
-            None
-        }
     }
 
     fn start(_: usize) {
@@ -615,14 +609,17 @@ impl HrbBinaryLoader {
 }
 
 impl BinaryLoader for HrbBinaryLoader {
-    fn option(&mut self) -> &mut LoadedImageOption {
-        &mut self.lio
+    fn preferred_extension<'a>(&self) -> &'a str {
+        "hrb"
     }
 
-    fn load(&mut self, blob: &[u8]) -> Result<(), ()> {
-        unsafe {
-            let blob_ptr = &blob[0] as *const u8;
-            let header = (blob_ptr as *const HrbExecutable).as_ref().unwrap();
+    fn recognize(&self, blob: &[u8]) -> bool {
+        HrbBinaryLoader::identify(blob)
+    }
+
+    fn spawn(&self, blob: &[u8], lio: LoadedImageOption) -> Result<ProcessId, Error> {
+        let (ctx, app_image) = unsafe {
+            let header: &HrbExecutable = &*(blob.as_ptr() as *const HrbExecutable);
             let size_of_code = header.start_data as usize;
             let rva_data = (size_of_code + 0xFFF) & !0xFFF;
             let size_of_ds = header.size_of_ds as usize;
@@ -630,38 +627,44 @@ impl BinaryLoader for HrbBinaryLoader {
             let image_size = rva_data + size_of_ds;
             let stack_pointer = header.esp as usize;
 
-            let image_base = MemoryManager::zalloc(Layout::from_size_align_unchecked(
-                image_size,
-                MemoryManager::PAGE_SIZE_MIN,
-            ))
-            .unwrap()
-            .get() as *mut u8;
-            image_base.write_bytes(0, image_size);
+            let mut app_image = Vec::new();
+            app_image
+                .try_reserve(image_size)
+                .map_err(|_| ErrorKind::OutOfMemory)?;
+            app_image.resize(image_size, 0);
 
-            let base_code = image_base;
-            base_code.copy_from_nonoverlapping(blob_ptr, size_of_code);
-            let base_data = image_base.add(rva_data);
-            base_data
+            let image_base = (PhysicalAddress::direct_unmap(app_image.as_ptr())
+                .unwrap()
+                .as_u64())
+            .try_into()
+            .map_err(|_| ErrorKind::OutOfMemory)?;
+
+            app_image
+                .as_mut_ptr()
+                .copy_from_nonoverlapping(blob.as_ptr(), size_of_code);
+
+            app_image
+                .as_mut_ptr()
+                .add(rva_data)
                 .add(stack_pointer)
-                .copy_from_nonoverlapping(blob_ptr.add(size_of_code), size_of_data);
+                .copy_from_nonoverlapping(blob.as_ptr().add(size_of_code), size_of_data);
 
-            self.ctx.image_base = image_base as u32;
-            self.ctx.image_size = image_size as u32;
-            self.ctx.base_of_code = base_code as u32;
-            self.ctx.size_of_code = size_of_code as u32;
-            self.ctx.base_of_data = base_data as u32;
-            self.ctx.size_of_data = size_of_ds as u32;
-            self.ctx.start = HrbExecutable::START;
-            self.ctx.stack_pointer = stack_pointer as u32;
-        }
-        Ok(())
-    }
+            let mut ctx = LegacyAppContext::default();
+            ctx.image_base = image_base;
+            ctx.image_size = image_size as u32;
+            ctx.base_of_code = image_base;
+            ctx.size_of_code = size_of_code as u32;
+            ctx.base_of_data = image_base + rva_data as u32;
+            ctx.size_of_data = size_of_ds as u32;
+            ctx.start = HrbExecutable::START;
+            ctx.stack_pointer = stack_pointer as u32;
 
-    fn invoke_start(self: Box<Self>) -> Option<ProcessId> {
-        let cmdline = self.lio.argv.join(" ");
+            (ctx, app_image.into_boxed_slice())
+        };
+
         SpawnOption::new()
-            .personality(Hoe::new(self.ctx, cmdline))
-            .start_process(Self::start, 0, self.lio.name.as_ref())
+            .personality(Hoe::new(ctx, app_image, lio.argv.join(" ")))
+            .start_process(Self::start, 0, lio.name.as_ref())
     }
 }
 
@@ -674,20 +677,19 @@ struct HoeWindow {
 
 impl HoeWindow {
     const WINDOW_BGCOLOR: u8 = 7;
-    const WINDOW_ADJUST_X: u32 = 2;
-    const WINDOW_ADJUST_TOP: u32 = 22;
-    const WINDOW_ADJUST_BOTTOM: u32 = 2;
+    const WINDOW_ADJUST_X: i32 = 2;
+    const WINDOW_ADJUST_TOP: i32 = 22;
+    const WINDOW_ADJUST_BOTTOM: i32 = 2;
 
     fn new(hoe: &Hoe, title: &str, width: u32, height: u32, buffer: u32) -> Self {
         let handle = RawWindowBuilder::new()
             .size(Size::new(
-                (width - Self::WINDOW_ADJUST_X * 2) as isize,
-                (height - (Self::WINDOW_ADJUST_TOP + Self::WINDOW_ADJUST_BOTTOM)) as isize,
+                (width as i32 - Self::WINDOW_ADJUST_X * 2) as u32,
+                (height as i32 - (Self::WINDOW_ADJUST_TOP + Self::WINDOW_ADJUST_BOTTOM)) as u32,
             ))
             .bg_color(Hoe::get_color(Self::WINDOW_BGCOLOR))
-            // .active_title_color(Color::LIGHT_BLUE)
+            .active_title_color(Color::LIGHT_BLUE)
             // .inactive_title_color(ui::theme::Theme::shared().window_title_inactive_background())
-            // .style_add(WindowStyle::DARK_MODE)
             .opaque()
             .build(title);
         let window = HoeWindow {
@@ -755,16 +757,16 @@ impl HoeWindow {
     }
 
     fn redraw_rect(&self, hoe: &Hoe, x0: u32, y0: u32, x1: u32, y1: u32) {
-        let left = u32::max(Self::WINDOW_ADJUST_X, u32::min(x0, x1));
-        let top = u32::max(Self::WINDOW_ADJUST_TOP, u32::min(y0, y1));
-        let right = u32::min(self.width - Self::WINDOW_ADJUST_X, u32::max(x0, x1));
-        let bottom = u32::min(self.height - Self::WINDOW_ADJUST_BOTTOM, u32::max(y0, y1));
+        let left = Self::WINDOW_ADJUST_X.max(x0.min(x1) as i32);
+        let top = Self::WINDOW_ADJUST_TOP.max(y0.min(y1) as i32);
+        let right = (self.width as i32 - Self::WINDOW_ADJUST_X).min(x0.max(x1) as i32);
+        let bottom = (self.height as i32 - Self::WINDOW_ADJUST_BOTTOM).min(y0.max(y1) as i32);
 
         let coords = Coordinates::new(
-            (left - Self::WINDOW_ADJUST_X) as isize,
-            (top - Self::WINDOW_ADJUST_TOP) as isize,
-            (right - Self::WINDOW_ADJUST_X) as isize + 1,
-            (bottom - Self::WINDOW_ADJUST_TOP) as isize + 1,
+            left - Self::WINDOW_ADJUST_X,
+            top - Self::WINDOW_ADJUST_TOP,
+            right - Self::WINDOW_ADJUST_X + 1,
+            bottom - Self::WINDOW_ADJUST_TOP + 1,
         );
         let rect = Rect::from(coords);
 
@@ -780,7 +782,7 @@ impl HoeWindow {
                     for x in 0..width {
                         let color = Hoe::get_color(line[x]);
                         unsafe {
-                            bitmap.set_pixel_unchecked(Point::new(x as isize, y as isize), color);
+                            bitmap.set_pixel_unchecked(Point::new(x as i32, y as i32), color);
                         }
                     }
                 }
@@ -790,15 +792,15 @@ impl HoeWindow {
     }
 
     fn fill_rect(&self, hoe: &Hoe, x0: u32, y0: u32, x1: u32, y1: u32, c: u8, refreshing: bool) {
-        let left = u32::max(Self::WINDOW_ADJUST_X, u32::min(x0, x1));
-        let top = u32::max(Self::WINDOW_ADJUST_TOP, u32::min(y0, y1));
-        let right = u32::min(self.width - Self::WINDOW_ADJUST_X, u32::max(x0, x1));
-        let bottom = u32::min(self.height - Self::WINDOW_ADJUST_BOTTOM, u32::max(y0, y1));
+        let left = (Self::WINDOW_ADJUST_X as u32).max(x0.min(x1)) as usize;
+        let top = (Self::WINDOW_ADJUST_TOP as u32).max(y0.min(y1)) as usize;
+        let right = (self.width - Self::WINDOW_ADJUST_X as u32).min(x0.max(x1)) as usize;
+        let bottom = (self.height - Self::WINDOW_ADJUST_BOTTOM as u32).min(y0.max(y1)) as usize;
 
         let buffer = self.buffer(hoe);
-        let stride = self.width;
+        let stride = self.width as usize;
         for y in top..=bottom {
-            let line = y * stride;
+            let line = y as usize * stride;
             let line = &mut buffer[(line + left) as usize..=(line + right) as usize];
             for r in line {
                 *r = c;
@@ -806,7 +808,7 @@ impl HoeWindow {
         }
 
         if refreshing {
-            self.redraw_rect(hoe, left, top, right, bottom);
+            self.redraw_rect(hoe, x0, y0, x1, y1);
         }
     }
 
@@ -823,8 +825,8 @@ impl HoeWindow {
 
     fn draw_line(&self, hoe: &Hoe, c0: Point, c1: Point, c: u8, refreshing: bool) {
         let buffer = self.buffer(hoe);
-        let width = self.width as isize;
-        let height = self.height as isize;
+        let width = self.width as i32;
+        let height = self.height as i32;
         let stride = self.width as usize;
         c0.line_to(c1, |p| {
             if p.x >= 0 && p.x < width && p.y >= 0 && p.y < height {
@@ -839,7 +841,7 @@ impl HoeWindow {
     const BIT_MASKS: [u8; 8] = [0x80, 0x40, 0x20, 0x10, 0x08, 0x04, 0x02, 0x01];
 
     fn put_font_data(&self, hoe: &Hoe, origin: Point, data: &[u8], color: u8) {
-        if origin.x < self.width as isize - 8 && origin.y < self.height as isize - 16 {
+        if origin.x < self.width as i32 - 8 && origin.y < self.height as i32 - 16 {
             let stride = self.width as usize;
             let buffer = self.buffer(hoe);
             for y in 0..16 {
@@ -855,7 +857,7 @@ impl HoeWindow {
         }
     }
 
-    fn put_font(&self, hoe: &Hoe, origin: Point, jc: JisChar, color: u8) -> isize {
+    fn put_font(&self, hoe: &Hoe, origin: Point, jc: JisChar, color: u8) -> i32 {
         match jc {
             JisChar::ANK(ch) => {
                 match ch {
@@ -878,14 +880,14 @@ impl HoeWindow {
                 8
             }
             JisChar::Kanji(kanji) => {
-                if origin.x < self.width as isize - 16 && origin.y < self.height as isize - 16 {
+                if origin.x < self.width as i32 - 16 && origin.y < self.height as i32 - 16 {
                     let base = 0x1000 + kanji as usize * 32;
                     let left = HoeManager::japanese_font().get(base..base + 16);
                     let right = HoeManager::japanese_font().get(base + 16..base + 32);
                     match (left, right) {
                         (Some(left), Some(right)) => {
                             self.put_font_data(hoe, origin, left, color);
-                            self.put_font_data(hoe, origin + Movement::new(8, 0), right, color);
+                            self.put_font_data(hoe, origin + Point::new(8, 0), right, color);
                         }
                         _ => {
                             let x0 = (origin.x + 1) as u32;

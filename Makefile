@@ -13,40 +13,36 @@ INITRD_IMG	= $(EFI_VENDOR)/initrd.img
 KRNL_ARCH	= x86_64-unknown-none
 TARGET_KERNEL	= system/target/$(KRNL_ARCH)/release/kernel.bin
 TARGET_ISO	= var/megos.iso
-TARGETS		= boot kernel
-ALL_TARGETS	= $(TARGETS) apps
+ALL_TARGETS	= boot kernel apps
 VAR_INITRD	= var/initrd/
-INITRD_DEV	= var/initrd/dev/
-INITRD_FILES	= LICENSE $(VAR_INITRD)* $(ASSETS)initrd/* apps/target/wasm32-unknown-unknown/release/*.wasm
+INITRD_FILES	= LICENSE $(ASSETS)initrd/* apps/target/wasm32-unknown-unknown/release/*.wasm $(VAR_INITRD)*
 
-X64_SMP			= system/src/arch/x64/smpinit
-X64_SMP_ASM		= $(X64_SMP).asm
-X64_SMP_BIN		= $(X64_SMP).bin
+SMP_X64			= system/src/arch/x64/smpinit
+SMP_X64_ASM		= $(SMP_X64).asm
+SMP_X64_BIN		= $(SMP_X64).bin
 
 QEMU_X64		= qemu-system-x86_64
 OVMF_X64		= var/ovmfx64.fd
-BOOT_EFI_BOOT1	= $(EFI_BOOT)/bootx64.efi
-BOOT_EFI_VENDOR1	= $(EFI_VENDOR)/bootx64.efi
-TARGET_BOOT_EFI1	= boot/target/x86_64-unknown-uefi/release/boot-efi.efi
+EFI_CUSTOM_LOADER_X64	= var/bootx64.efi
+BOOT_EFI_BOOT_X64	= $(EFI_BOOT)/bootx64.efi
+BOOT_EFI_VENDOR_X64	= $(EFI_VENDOR)/bootx64.efi
+TARGET_BOOT_EFI_X64	= boot/target/x86_64-unknown-uefi/release/boot-efi.efi
 
 OVMF_X86		= var/ovmfia32.fd
-BOOT_EFI_BOOT2	= $(EFI_BOOT)/bootia32.efi
-BOOT_EFI_VENDOR2	= $(EFI_VENDOR)/bootia32.efi
-TARGET_BOOT_EFI2	= boot/target/i686-unknown-uefi/release/boot-efi.efi
-
-default: $(TARGETS)
+EFI_CUSTOM_LOADER_X86	= var/bootx86.efi
+BOOT_EFI_BOOT_X86	= $(EFI_BOOT)/bootia32.efi
+BOOT_EFI_VENDOR_X86	= $(EFI_VENDOR)/bootia32.efi
+TARGET_BOOT_EFI_X86	= boot/target/i686-unknown-uefi/release/boot-efi.efi
 
 all: $(ALL_TARGETS)
 
+default: all
+
 clean:
-	(cd system; cargo clean)
-	(cd apps; cargo clean)
-	(cd boot; cargo clean)
-	(cd tools; cargo clean)
-	-rm -rf system/target apps/target boot/target tools/target
+	-rm -rf system/target apps/target boot/target tools/target lib/*/target
 
 refresh: clean
-	-rm system/Cargo.lock apps/Cargo.lock boot/Cargo.lock tools/Cargo.lock lib/**/Cargo.lock
+	-rm system/Cargo.lock apps/Cargo.lock boot/Cargo.lock tools/Cargo.lock lib/*/Cargo.lock
 
 # $(RUST_ARCH).json:
 # 	rustc +nightly -Z unstable-options --print target-spec-json --target $(RUST_ARCH) | sed -e 's/-sse,+/+sse,-/' > $@
@@ -58,7 +54,7 @@ $(EFI_VENDOR):
 	mkdir -p $(EFI_VENDOR)
 
 run:
-	$(QEMU_X64) -machine q35 -cpu SandyBridge -smp 4,cores=2,threads=2 \
+	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4,cores=2,threads=2 \
 -bios $(OVMF_X64) \
 -rtc base=localtime,clock=host \
 -device virtio-net-pci \
@@ -80,7 +76,7 @@ run_up:
 -monitor stdio
 
 run_x86:
-	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4,cores=2,threads=2 \
+	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4 \
 -bios $(OVMF_X86) \
 -rtc base=localtime,clock=host \
 -device nec-usb-xhci,id=xhci -device usb-tablet \
@@ -91,20 +87,22 @@ run_x86:
 boot:
 	(cd boot; cargo build --release --target x86_64-unknown-uefi --target i686-unknown-uefi)
 
-kernel: $(X64_SMP_BIN)
+kernel: $(SMP_X64_BIN)
 	(cd system; cargo build --release --target $(KRNL_ARCH).json)
 
-$(X64_SMP_BIN): $(X64_SMP_ASM)
+$(SMP_X64_BIN): $(SMP_X64_ASM)
 	nasm -f bin $< -o $@
 
 $(VAR_INITRD):
-	-mkdir -p $(INITRD_DEV)
+	-mkdir -p $(VAR_INITRD)
 
 install: test $(EFI_VENDOR) $(EFI_BOOT) $(ALL_TARGETS) tools/mkinitrd/src/*.rs $(VAR_INITRD)
-	cp $(TARGET_BOOT_EFI1) $(BOOT_EFI_BOOT1)
-	cp $(TARGET_BOOT_EFI1) $(BOOT_EFI_VENDOR1)
-	cp $(TARGET_BOOT_EFI2) $(BOOT_EFI_BOOT2)
-	cp $(TARGET_BOOT_EFI2) $(BOOT_EFI_VENDOR2)
+	if [ -f $(EFI_CUSTOM_LOADER_X64) ]; then cp $(EFI_CUSTOM_LOADER_X64) $(BOOT_EFI_BOOT_X64); \
+		else cp $(TARGET_BOOT_EFI_X64) $(BOOT_EFI_BOOT_X64); fi
+	cp $(TARGET_BOOT_EFI_X64) $(BOOT_EFI_VENDOR_X64)
+	if [ -f $(EFI_CUSTOM_LOADER_X86) ]; then cp $(EFI_CUSTOM_LOADER_X86) $(BOOT_EFI_BOOT_X86); \
+		else cp $(TARGET_BOOT_EFI_X86) $(BOOT_EFI_BOOT_X86); fi
+	cp $(TARGET_BOOT_EFI_X86) $(BOOT_EFI_VENDOR_X86)
 	cp $(TARGET_KERNEL) $(KERNEL_BIN)
 	cargo run --manifest-path ./tools/mkinitrd/Cargo.toml -- -v $(INITRD_IMG) $(INITRD_FILES)
 
@@ -119,8 +117,9 @@ apps:
 test:
 	cargo test --manifest-path lib/megstd/Cargo.toml
 	cargo test --manifest-path lib/meggl/Cargo.toml
-	cargo test --manifest-path lib/wasm/Cargo.toml
+	cargo test --manifest-path lib/wami/Cargo.toml
 	cargo test --manifest-path lib/mar/Cargo.toml
+	cargo test --manifest-path lib/uuid/Cargo.toml
 
 doc:
 	(cd system; cargo doc --all --target $(KRNL_ARCH).json)

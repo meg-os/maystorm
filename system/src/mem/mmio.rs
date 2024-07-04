@@ -1,9 +1,8 @@
 use super::*;
-use crate::{drivers::pci::PciBar, *};
-use core::{
-    mem::{size_of, transmute},
-    num::NonZeroUsize,
-};
+use crate::drivers::pci::PciBar;
+use crate::*;
+use core::mem::size_of;
+use core::slice;
 
 macro_rules! mmio_reg_declare {
     (
@@ -74,124 +73,94 @@ impl MmioSlice {
     }
 
     #[inline]
-    pub unsafe fn from_virt(base: NonZeroUsize, size: usize) -> Self {
-        Self {
-            base: base.get(),
-            size,
+    #[track_caller]
+    fn effective_address<T: Sized>(&self, offset: usize) -> *const T {
+        unsafe {
+            slice::from_raw_parts(self.base as *const u8, self.size)
+                [offset..offset + size_of::<T>()]
+                .as_ptr() as *const T
         }
     }
 
     #[inline]
     #[track_caller]
-    fn check_limit<T>(&self, offset: usize, _: &T)
-    where
-        T: Sized,
-    {
-        let delta = size_of::<T>();
-        assert!(
-            offset + delta <= self.size,
-            "mmio: index {}..{} is out of bounds",
-            offset,
-            offset + delta,
-        );
-    }
-
-    #[inline]
-    pub const fn base(&self) -> usize {
-        self.base
-    }
-
-    #[inline]
-    pub const fn size(&self) -> usize {
-        self.size
+    fn effective_address_mut<T: Sized>(&self, offset: usize) -> *mut T {
+        unsafe {
+            slice::from_raw_parts_mut(self.base as *mut u8, self.size)
+                [offset..offset + size_of::<T>()]
+                .as_mut_ptr() as *mut T
+        }
     }
 
     #[inline]
     #[track_caller]
     pub fn read_u8(&self, offset: usize) -> u8 {
-        let mut result = 0;
-        self.check_limit(offset, &result);
-        unsafe {
-            let ptr: &MmioRegU8 = transmute(self.base + offset);
-            result = ptr.read_volatile();
-        };
-        result
+        unsafe { self.effective_address::<u8>(offset).read_volatile() }
     }
 
     #[inline]
     #[track_caller]
     pub fn write_u8(&self, offset: usize, value: u8) {
-        self.check_limit(offset, &value);
         unsafe {
-            let ptr: &MmioRegU8 = transmute(self.base + offset);
-            ptr.write_volatile(value);
-        };
+            self.effective_address_mut::<u8>(offset)
+                .write_volatile(value);
+        }
     }
 
     #[inline]
     #[track_caller]
     pub fn read_u16(&self, offset: usize) -> u16 {
-        let mut result = 0;
-        self.check_limit(offset, &result);
+        unsafe { self.effective_address::<u16>(offset).read_volatile() }
+    }
+
+    #[inline]
+    #[track_caller]
+    pub fn write_u16(&self, offset: usize, value: u16) {
         unsafe {
-            let ptr: &MmioRegU16 = transmute(self.base + offset);
-            result = ptr.read_volatile();
-        };
-        result
+            self.effective_address_mut::<u16>(offset)
+                .write_volatile(value);
+        }
     }
 
     #[inline]
     #[track_caller]
     pub fn read_u32(&self, offset: usize) -> u32 {
-        let mut result = 0;
-        self.check_limit(offset, &result);
-        unsafe {
-            let ptr: &MmioRegU32 = transmute(self.base + offset);
-            result = ptr.read_volatile();
-        };
-        result
+        unsafe { self.effective_address::<u32>(offset).read_volatile() }
     }
 
     #[inline]
     #[track_caller]
     pub fn write_u32(&self, offset: usize, value: u32) {
-        self.check_limit(offset, &value);
         unsafe {
-            let ptr: &MmioRegU32 = transmute(self.base + offset);
-            ptr.write_volatile(value);
-        };
+            self.effective_address_mut::<u32>(offset)
+                .write_volatile(value);
+        }
     }
 
     #[inline]
     #[track_caller]
     pub fn read_u64(&self, offset: usize) -> u64 {
-        let mut result = 0;
-        self.check_limit(offset, &result);
-        unsafe {
-            let ptr: &MmioRegU64 = transmute(self.base + offset);
-            result = ptr.read_volatile();
-        };
-        result
+        unsafe { self.effective_address::<u64>(offset).read_volatile() }
     }
 
     #[inline]
     #[track_caller]
     pub fn write_u64(&self, offset: usize, value: u64) {
-        self.check_limit(offset, &value);
         unsafe {
-            let ptr: &MmioRegU64 = transmute(self.base + offset);
-            ptr.write_volatile(value);
-        };
+            self.effective_address_mut::<u64>(offset)
+                .write_volatile(value);
+        }
     }
 
     #[inline]
     #[track_caller]
-    pub unsafe fn transmute<T>(&self, offset: usize) -> &'static T
-    where
-        T: Sized,
-    {
-        let result = transmute((self.base as *const u8).add(offset));
-        self.check_limit(offset, &result);
-        result
+    pub unsafe fn transmute<T: Sized>(&self, offset: usize) -> &'static T {
+        unsafe { &*self.effective_address::<T>(offset) }
+    }
+
+    #[inline]
+    #[track_caller]
+    pub unsafe fn transmute_mut<T: Sized>(&self, offset: usize) -> &'static mut T {
+        unsafe { &mut *self.effective_address_mut::<T>(offset) }
     }
 }

@@ -129,6 +129,13 @@ pub trait HalPci {
 }
 
 pub trait HalSpinlock {
+    fn is_locked(&self) -> bool;
+
+    #[inline]
+    fn is_unlocked(&self) -> bool {
+        !self.is_locked()
+    }
+
     #[must_use]
     fn try_lock(&self) -> bool;
 

@@ -1,8 +1,7 @@
 //! Error
 //! Most of them are clones of Rust's original definition.
 
-use crate::error;
-use alloc::boxed::Box;
+use crate::prelude::*;
 use core::fmt;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -176,6 +175,8 @@ pub enum ErrorKind {
     /// New [`ErrorKind`]s might be added in the future for some of those.
     Other,
 
+    ExecFormatError,
+
     /// Any I/O error from the standard library that's not part of this list.
     ///
     /// Errors that are `Uncategorized` now may move to a different or a new
@@ -192,6 +193,24 @@ pub struct Error {
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.repr, f)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.repr {
+            Repr::Os(err) => {
+                write!(f, "OsError({})", err)
+            }
+            Repr::Simple(ref repr) => (repr as &dyn fmt::Debug).fmt(f),
+            Repr::Custom(ref repr) => (repr as &dyn fmt::Debug).fmt(f),
+        }
+    }
+}
+
+impl core::error::Error for Error {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        Some(self)
     }
 }
 
@@ -273,6 +292,7 @@ impl Error {
 }
 
 impl From<ErrorKind> for Error {
+    #[inline]
     fn from(val: ErrorKind) -> Self {
         Self {
             repr: Repr::Simple(val),

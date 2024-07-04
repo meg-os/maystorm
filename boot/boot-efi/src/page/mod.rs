@@ -2,8 +2,8 @@ use bootprot::*;
 use core::ops::*;
 use uefi::table::boot::*;
 
-cfg_if::cfg_if! {
-    if #[cfg(any(target_arch = "x86_64", target_arch = "x86"))] {
+cfg_match! {
+    cfg(any(target_arch = "x86_64", target_arch = "x86")) => {
         mod amd64;
         pub use amd64::*;
     }
@@ -20,6 +20,7 @@ pub type PhysicalAddress = u64;
 pub struct VirtualAddress(pub IntPtr);
 
 impl VirtualAddress {
+    #[inline]
     pub const fn as_u64(&self) -> u64 {
         self.0 as u64
     }
@@ -27,6 +28,8 @@ impl VirtualAddress {
 
 impl Add<u32> for VirtualAddress {
     type Output = Self;
+
+    #[inline]
     fn add(self, rhs: u32) -> Self {
         VirtualAddress(self.0 + rhs as IntPtr)
     }
@@ -34,6 +37,8 @@ impl Add<u32> for VirtualAddress {
 
 impl Add<u64> for VirtualAddress {
     type Output = Self;
+
+    #[inline]
     fn add(self, rhs: u64) -> Self {
         VirtualAddress(self.0 + rhs as IntPtr)
     }
@@ -41,6 +46,8 @@ impl Add<u64> for VirtualAddress {
 
 impl Add<usize> for VirtualAddress {
     type Output = Self;
+
+    #[inline]
     fn add(self, rhs: usize) -> Self {
         VirtualAddress(self.0 + rhs as IntPtr)
     }
@@ -48,26 +55,23 @@ impl Add<usize> for VirtualAddress {
 
 impl Sub<usize> for VirtualAddress {
     type Output = Self;
+
+    #[inline]
     fn sub(self, rhs: usize) -> Self {
         VirtualAddress(self.0 - rhs as IntPtr)
     }
 }
 
 pub trait MemoryTypeHelper {
-    fn is_conventional_at_runtime(&self) -> bool;
+    fn is_available_at_runtime(&self) -> bool;
     fn is_countable(&self) -> bool;
     fn as_boot_memory_type(&self) -> BootMemoryType;
 }
 
 impl MemoryTypeHelper for MemoryType {
     #[inline]
-    fn is_conventional_at_runtime(&self) -> bool {
-        match *self {
-            MemoryType::CONVENTIONAL
-            | MemoryType::BOOT_SERVICES_CODE
-            | MemoryType::BOOT_SERVICES_DATA => true,
-            _ => false,
-        }
+    fn is_available_at_runtime(&self) -> bool {
+        matches!(self.as_boot_memory_type(), BootMemoryType::Available)
     }
 
     #[inline]
@@ -106,3 +110,6 @@ impl MemoryTypeHelper for MemoryType {
         }
     }
 }
+
+use myelf::SegmentFlags;
+pub type MProtect = SegmentFlags;

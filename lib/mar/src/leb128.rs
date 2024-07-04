@@ -1,6 +1,8 @@
 //! Little Endian Base 128
+#[allow(unused_imports)]
 use alloc::vec::Vec;
-use core::{mem::size_of_val, str};
+use core::mem::size_of_val;
+use core::str;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq)]

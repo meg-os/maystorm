@@ -1,21 +1,16 @@
 //! xHCI MMIO Registers
 
 use super::*;
-use crate::{
-    drivers::usb::*,
-    mem::{
-        mmio::{MmioRegU32, MmioRegU64},
-        MemoryManager,
-    },
-    *,
+use crate::drivers::usb::*;
+use crate::mem::{
+    mmio::{MmioRegU32, MmioRegU64},
+    MemoryManager,
 };
-use core::{
-    ffi::c_void,
-    mem::size_of,
-    mem::transmute,
-    num::{NonZeroU8, NonZeroUsize},
-    slice,
-};
+use crate::*;
+use core::ffi::c_void;
+use core::mem::{size_of, transmute};
+use core::num::{NonZeroU8, NonZeroUsize};
+use core::slice;
 
 /// xHC Capability Registers
 #[repr(C)]

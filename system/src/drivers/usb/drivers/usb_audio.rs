@@ -2,9 +2,9 @@
 
 use super::super::*;
 use crate::task::Task;
+use crate::*;
 use core::pin::Pin;
 use futures_util::Future;
-use megstd::{Arc, Box};
 
 pub struct UsbAudioStarter;
 
@@ -22,7 +22,7 @@ impl UsbInterfaceDriverStarter for UsbAudioStarter {
         if_no: UsbInterfaceNumber,
         class: UsbClass,
     ) -> Option<Pin<Box<dyn Future<Output = Result<Task, UsbError>>>>> {
-        if class.base() == UsbBaseClass::AUDIO {
+        if class.base_class() == UsbBaseClass::AUDIO {
             Some(Box::pin(UsbAudioDriver::_instantiate(
                 device.clone(),
                 if_no,

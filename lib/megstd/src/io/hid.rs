@@ -1,10 +1,8 @@
 //! Human Interface Device Manager
 
-use alloc::vec::Vec;
-use core::{
-    num::NonZeroU8,
-    ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign},
-};
+use crate::prelude::*;
+use core::num::NonZeroU8;
+use core::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
@@ -502,7 +500,6 @@ impl Default for Modifier {
     }
 }
 
-#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct MouseReport<T> {
     pub buttons: MouseButton,
@@ -737,6 +734,7 @@ impl Iterator for HidReporteReader<'_> {
 }
 
 #[repr(u8)]
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HidReportType {
     Input = 1,
@@ -822,6 +820,7 @@ impl HidReportItemType {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]
 pub enum HidReportItemTag {
     // Main
@@ -920,6 +919,7 @@ impl HidReportMainFlag {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromPrimitive)]
 pub enum HidReportCollectionType {
     Physical = 0,
@@ -1117,8 +1117,8 @@ impl HidReportLocalState {
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DeviceMode {
     Mouse = 0,
     SingleInputDevice,

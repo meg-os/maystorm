@@ -6,13 +6,24 @@
 #![no_main]
 
 extern crate alloc;
+use alloc::str;
 use bootprot::*;
-use core::{fmt, fmt::Write, num::NonZeroU8};
-use kernel::{
-    drivers::pci, drivers::usb, fs::OpenOptions, fs::*, mem::*, rt::*, system::*,
-    task::scheduler::*, ui::window::WindowManager, user::userenv::UserEnv, *,
-};
-use megstd::{io::Read, String, ToOwned, ToString, Vec};
+use core::fmt::{self, Write};
+use core::num::NonZeroU8;
+use core::ptr::{addr_of, addr_of_mut};
+use kernel::drivers::pci;
+use kernel::drivers::usb;
+use kernel::fs::*;
+use kernel::init::SysInit;
+use kernel::mem::*;
+use kernel::rt::*;
+use kernel::system::*;
+use kernel::task::scheduler::*;
+use kernel::ui::window::WindowManager;
+use kernel::*;
+use megstd::io::Read;
+use megstd::path::Path;
+use megstd::time::SystemTime;
 
 /// Kernel entry point
 #[no_mangle]
@@ -22,8 +33,13 @@ unsafe fn _start(info: &BootInfo) -> ! {
 
 static mut MAIN: Shell = Shell::new();
 
+const ENV_HOME: &str = "HOME";
+const ENV_PATH: &str = "PATH";
+const ENV_PATH_EXT: &str = "PATHEXT";
+const SEP_PATH: &str = ":";
+
 pub struct Shell {
-    path_ext: Vec<String>,
+    env: BTreeMap<String, String>,
 }
 
 enum ParsedCmdLine {
@@ -32,44 +48,108 @@ enum ParsedCmdLine {
 }
 
 impl Shell {
+    #[inline]
     const fn new() -> Self {
         Self {
-            path_ext: Vec::new(),
+            env: BTreeMap::new(),
         }
     }
 
-    fn shared<'a>() -> &'a mut Self {
-        unsafe { &mut MAIN }
+    #[inline]
+    unsafe fn shared_mut<'a>() -> &'a mut Self {
+        unsafe { &mut *addr_of_mut!(MAIN) }
+    }
+
+    #[inline]
+    fn shared<'a>() -> &'a Self {
+        unsafe { &*addr_of!(MAIN) }
     }
 
     // Shell entry point
     fn start() {
-        let shared = Self::shared();
+        let shared = unsafe { Self::shared_mut() };
+        let mut path_ext = Vec::new();
         for ext in RuntimeEnvironment::supported_extensions() {
-            shared.path_ext.push(ext.to_string());
+            path_ext.push(format!(".{ext}"));
         }
+        shared.set_env(ENV_PATH_EXT, &path_ext.join(SEP_PATH));
+
+        shared.set_env(ENV_HOME, "/boot");
+        shared.set_env(ENV_PATH, "/bin:/boot:/boot/bin:/boot/system/bin");
+
+        Self::exec_cmd("cd");
+
+        let _ = Self::exec_script("startup.txt");
 
         Scheduler::spawn_async(Self::repl_main());
         Scheduler::perform_tasks();
     }
 
+    #[inline]
+    fn set_env(&mut self, key: &str, value: &str) {
+        self.env.insert(key.to_owned(), value.to_owned());
+    }
+
+    #[inline]
+    fn get_env(&self, key: &str) -> Option<&str> {
+        self.env.get(key).map(|v| v.as_str())
+    }
+
     async fn repl_main() {
+        let stdout = System::stdout();
         loop {
-            print!("# ");
+            let cwd = Scheduler::current_pid().cwd();
+            let lpc = match Path::new(&cwd).file_name() {
+                Some(v) => v,
+                None => OsStr::new("/"),
+            };
+            let attributes = stdout.attributes();
+            let text_bg = attributes & 0xF0;
+            stdout.set_attribute(text_bg | 0x09);
+            print!("{}", lpc.to_str().unwrap());
+            stdout.set_attribute(0);
+            print!("> ");
             if let Ok(cmdline) = System::stdout().read_line_async(120).await {
                 Self::exec_cmd(&cmdline);
             }
         }
     }
 
+    fn exec_script(path: &str) -> Result<(), megstd::io::Error> {
+        let mut file = FileManager::open(path, OpenOptions::new().read(true))?;
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        let script = core::str::from_utf8(&buf).map_err(|_| megstd::io::ErrorKind::InvalidData)?;
+
+        for line in script.lines() {
+            if !line.starts_with("#") {
+                Self::exec_cmd(line);
+            }
+        }
+
+        Ok(())
+    }
+
     fn exec_cmd(cmdline: &str) {
+        let mut cmdline = cmdline;
+        let mut wait_until = true;
+        if cmdline.ends_with("&") {
+            wait_until = false;
+            cmdline = &cmdline[..cmdline.len() - 1];
+        }
         match Self::parse_cmd(cmdline) {
             Ok((cmd, args)) => {
                 let name = cmd.as_str();
-                let mut args = args.iter().map(|v| v.as_str()).collect::<Vec<&str>>();
+                let args = args.iter().map(|v| v.as_str()).collect::<Vec<&str>>();
                 match name {
-                    "clear" | "cls" | "reset" => System::stdout().reset().unwrap(),
-                    "exit" => println!("Feature not available"),
+                    "clear" | "cls" | "reset" => {
+                        System::stdout().reset().unwrap();
+                    }
+                    "exit" => {
+                        println!("Feature not available");
+                    }
                     "echo" => {
                         let stdout = System::stdout();
                         for (index, word) in args.iter().skip(1).enumerate() {
@@ -82,21 +162,53 @@ impl Shell {
                     }
                     "ver" => {
                         println!(
-                            "{} v{} (codename {})",
+                            "{} v{} ({})",
                             System::name(),
                             System::version(),
                             System::codename()
                         )
                     }
                     "reboot" => {
-                        UserEnv::system_reset(false);
+                        SysInit::system_reset(false);
                     }
                     "shutdown" => {
-                        UserEnv::system_reset(true);
+                        SysInit::system_reset(true);
+                    }
+                    "env" => {
+                        let shared = unsafe { Self::shared_mut() };
+                        if let Some(arg1) = args.get(1) {
+                            if arg1.contains("=") {
+                                let mut pair = arg1.split("=");
+                                let key = pair.next().unwrap();
+                                let value = pair.next().unwrap_or_default();
+                                if value.is_empty() {
+                                    shared.env.remove(key);
+                                } else {
+                                    shared.set_env(key, value);
+                                }
+                            } else {
+                                let key = arg1;
+                                let value = shared.get_env(key).unwrap_or_default();
+                                println!("{key}={value}");
+                            }
+                        } else {
+                            for key in shared.env.keys() {
+                                let value = shared.get_env(key).unwrap_or_default();
+                                println!("{key}={value}");
+                            }
+                        }
+                    }
+                    "printenv" => {
+                        let shared = Self::shared();
+                        for key in shared.env.keys() {
+                            let value = shared.get_env(key).unwrap_or_default();
+                            println!("{key}={value}");
+                        }
                     }
                     "uptime" => {
                         let systime = System::system_time();
-                        let sec = systime.secs;
+                        let systime = systime.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+                        let sec = systime.as_secs();
                         // let time_s = sec % 60;
                         let time_m = (sec / 60) % 60;
                         let time_h = (sec / 3600) % 24;
@@ -135,12 +247,7 @@ impl Shell {
                             exec(args.as_slice());
                         }
                         None => {
-                            if args.len() > 1 && args.last() == Some(&"&") {
-                                args.remove(args.len() - 1);
-                                Self::spawn(name, args.as_slice(), false);
-                            } else {
-                                Self::spawn(name, args.as_slice(), true);
-                            }
+                            Self::spawn(name, args.as_slice(), wait_until);
                         }
                     },
                 }
@@ -230,67 +337,52 @@ impl Shell {
         }
     }
 
-    fn spawn(name: &str, argv: &[&str], wait_until: bool) -> usize {
-        Self::spawn_main(name, argv, wait_until).unwrap_or_else(|| {
-            let mut sb = String::new();
-            let shared = Self::shared();
-            for ext in &shared.path_ext {
-                sb.clear();
-                write!(sb, "{}.{}", name, ext).unwrap();
-                match Self::spawn_main(sb.as_str(), argv, wait_until) {
-                    Some(v) => return v,
-                    None => (),
+    fn spawn(path: &str, argv: &[&str], wait_until: bool) -> usize {
+        Self::spawn_main(path, argv, wait_until).unwrap_or_else(|| {
+            let main_path = path;
+            if !main_path.contains("/") {
+                let mut sb = String::new();
+                let shared = Self::shared();
+                let path_ext = shared.get_env(ENV_PATH_EXT).unwrap_or_default();
+                let path_ext = path_ext.split(SEP_PATH);
+                let path = shared.get_env(ENV_PATH).unwrap_or_default();
+                let path = path.split(SEP_PATH);
+                for prefix in [""].into_iter().chain(path) {
+                    for ext in path_ext.clone() {
+                        sb.clear();
+                        if prefix.is_empty() {
+                            write!(sb, "{}{}", main_path, ext).unwrap();
+                        } else {
+                            write!(sb, "{}/{}{}", prefix, main_path, ext).unwrap();
+                        }
+                        match Self::spawn_main(sb.as_str(), argv, wait_until) {
+                            Some(v) => return v,
+                            None => (),
+                        }
+                    }
                 }
             }
-            println!("Command not found: {}", name);
+            println!("Command not found: {}", main_path);
             1
         })
     }
 
-    fn spawn_main(name: &str, argv: &[&str], wait_until: bool) -> Option<usize> {
-        FileManager::open(name, OpenOptions::new().read(true))
-            .map(|mut fcb| {
-                let stat = fcb.fstat().unwrap();
-                if !stat.file_type().is_file() {
-                    println!("permission denied: {}", name);
-                    return 1;
+    fn spawn_main(path: &str, argv: &[&str], wait_until: bool) -> Option<usize> {
+        match RuntimeEnvironment::spawn(path, argv) {
+            Ok(child) => {
+                if wait_until {
+                    child.join();
                 }
-                let file_size = stat.len() as usize;
-                if file_size > 0 {
-                    let mut vec = Vec::with_capacity(file_size);
-                    match fcb.read_to_end(&mut vec) {
-                        Ok(_v) => (),
-                        Err(err) => {
-                            println!("{}: File read error {:?}", name, err);
-                            return 1;
-                        }
-                    };
-                    let blob = vec.as_slice();
-                    if let Some(mut loader) = RuntimeEnvironment::recognize(blob) {
-                        loader.option().name = name.to_string();
-                        loader.option().argv = argv.iter().map(|v| v.to_string()).collect();
-                        match loader.load(blob) {
-                            Ok(_) => {
-                                let child = loader.invoke_start();
-                                if wait_until {
-                                    child.map(|thread| thread.join());
-                                }
-                            }
-                            Err(_) => {
-                                println!("Load error");
-                                return 1;
-                            }
-                        }
-                    } else {
-                        println!("Bad executable");
-                        return 1;
-                    }
-                } else {
-                    unreachable!()
+                Some(0)
+            }
+            Err(err) => match err.kind() {
+                megstd::io::ErrorKind::NotFound => None,
+                _ => {
+                    println!("error {:?}", err);
+                    Some(1)
                 }
-                0
-            })
-            .ok()
+            },
+        }
     }
 
     fn command(cmd: &str) -> Option<&'static fn(&[&str]) -> ()> {
@@ -303,23 +395,23 @@ impl Shell {
     }
 
     const COMMAND_TABLE: [(&'static str, fn(&[&str]) -> (), &'static str); 17] = [
+        ("cat", Self::cmd_cat, "Show a file"),
         ("cd", Self::cmd_cd, ""),
-        ("mkdir", Self::cmd_mkdir, ""),
-        ("rm", Self::cmd_rm, ""),
-        ("mv", Self::cmd_mv, ""),
-        ("touch", Self::cmd_touch, ""),
-        ("pwd", Self::cmd_pwd, ""),
-        ("ls", Self::cmd_ls, "Show directory"),
-        ("cat", Self::cmd_cat, "Show file"),
         ("dir", Self::cmd_ls, ""),
-        ("type", Self::cmd_cat, ""),
-        ("stat", Self::cmd_stat, ""),
-        ("mount", Self::cmd_mount, ""),
-        ("ps", Self::cmd_ps, ""),
-        ("lspci", Self::cmd_lspci, "Show List of PCI Devices"),
-        ("lsusb", Self::cmd_lsusb, "Show List of USB Devices"),
-        ("sysctl", Self::cmd_sysctl, "System Control"),
         ("help", Self::cmd_help, ""),
+        ("ls", Self::cmd_ls, "Show list of directory"),
+        ("lspci", Self::cmd_lspci, "Show list of PCI Devices"),
+        ("lsusb", Self::cmd_lsusb, "Show list of USB Devices"),
+        ("mkdir", Self::cmd_mkdir, ""),
+        ("mount", Self::cmd_mount, ""),
+        ("mv", Self::cmd_mv, ""),
+        ("ps", Self::cmd_ps, ""),
+        ("pwd", Self::cmd_pwd, ""),
+        ("rm", Self::cmd_rm, ""),
+        ("stat", Self::cmd_stat, ""),
+        ("sysctl", Self::cmd_sysctl, "System Control"),
+        ("touch", Self::cmd_touch, ""),
+        ("type", Self::cmd_cat, ""),
     ];
 
     fn cmd_help(_: &[&str]) {
@@ -331,10 +423,12 @@ impl Shell {
     }
 
     fn cmd_cd(argv: &[&str]) {
-        match FileManager::chdir(argv.get(1).unwrap_or(&"/")) {
+        let home = Self::shared().get_env(ENV_HOME).unwrap_or("/");
+        let path = argv.get(1).unwrap_or(&home);
+        match FileManager::chdir(path) {
             Ok(_) => (),
             Err(err) => {
-                println!("{:?}", err.kind());
+                println!("cd: {}: {:?}", path, err.kind());
             }
         }
     }
@@ -491,6 +585,11 @@ impl Shell {
                 MemoryManager::statistics(&mut sb);
                 print!("{}", sb.as_str());
             }
+            "memmap" => {
+                let mut sb = String::new();
+                MemoryManager::get_memory_map(&mut sb);
+                print!("{}", sb.as_str());
+            }
             "windows" => {
                 let mut sb = String::new();
                 WindowManager::get_statistics(&mut sb);
@@ -617,7 +716,7 @@ impl Shell {
                 stat.inode(),
                 stat.file_type(),
                 stat.len(),
-                FileManager::canonical_path(path),
+                FileManager::canonicalize(path),
             )
         }
     }
@@ -629,12 +728,8 @@ impl Shell {
 
         for key in keys {
             let mount_point = mount_points.get(key).unwrap();
-            println!(
-                "{} on {} {}",
-                mount_point.device_name(),
-                key,
-                mount_point.description()
-            );
+            let description = mount_point.description().unwrap_or_default();
+            println!("{} on {} {}", mount_point.device_name(), key, description);
         }
     }
 
@@ -646,7 +741,13 @@ impl Shell {
 
     fn cmd_lsusb(argv: &[&str]) {
         if let Some(addr) = argv.get(1).and_then(|v| v.parse::<NonZeroU8>().ok()) {
-            let addr = usb::UsbAddress::from(addr);
+            let addr = match usb::UsbAddress::from_nonzero(addr) {
+                Some(v) => v,
+                None => {
+                    println!("Error: Bad usb address");
+                    return;
+                }
+            };
             let device = match usb::UsbManager::device_by_addr(addr) {
                 Some(v) => v,
                 None => {
@@ -698,7 +799,7 @@ impl Shell {
                             "  endpoint {:02x} {:?} size {} interval {}",
                             endpoint.address().0,
                             endpoint.ep_type(),
-                            endpoint.descriptor().max_packet_size(),
+                            endpoint.descriptor().max_packet_size().0,
                             endpoint.descriptor().interval(),
                         );
                     }

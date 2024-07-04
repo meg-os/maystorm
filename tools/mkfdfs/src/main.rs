@@ -1,7 +1,9 @@
 // Make a floppy disk image
 // Copyright(c) 2021 The MEG-OS Project
 
-use mkfdfs::fat::*;
+pub mod fat;
+
+use fat::*;
 use std::{
     env,
     fs::File,
@@ -45,8 +47,7 @@ fn main() {
                 }
                 "-f" => {
                     let opt = args.next().expect("needs format type");
-                    current_bpb =
-                        Some(DosBpb::parse_type(opt.as_str()).expect("unknown format type"));
+                    current_bpb = Some(parse_type(opt.as_str()).expect("unknown format type"));
                 }
                 "-touch" => {
                     // TODO:
@@ -138,6 +139,19 @@ fn main() {
     fs.flush(&mut vd).unwrap();
     let mut os = File::create(path_output).unwrap();
     vd.flush(&mut os).unwrap();
+}
+
+pub fn parse_type(opt: &str) -> Option<DosBpb> {
+    match opt {
+        "2hd" | "1440" => Some(DosBpb::new(512, 1, 1, 2, 224, 80 * 2 * 18, 0xF0, 9, 18, 2)),
+        "2hc" | "1200" => Some(DosBpb::new(512, 1, 1, 2, 224, 80 * 2 * 15, 0xF9, 7, 15, 2)),
+        "nec" | "1232" => Some(DosBpb::new(1024, 1, 1, 2, 192, 77 * 2 * 8, 0xFE, 2, 8, 2)),
+        "2dd" | "720" => Some(DosBpb::new(512, 2, 1, 2, 112, 80 * 2 * 9, 0xF9, 3, 9, 2)),
+        "640" => Some(DosBpb::new(512, 2, 1, 2, 112, 80 * 2 * 8, 0xFB, 2, 8, 2)),
+        "320" => Some(DosBpb::new(512, 2, 1, 2, 112, 40 * 2 * 8, 0xFF, 2, 8, 2)),
+        "160" => Some(DosBpb::new(512, 1, 1, 2, 64, 40 * 1 * 8, 0xFE, 1, 8, 1)),
+        _ => None,
+    }
 }
 
 type FatEntry = u16;

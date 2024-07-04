@@ -1,12 +1,11 @@
 //! USB Hub Class Driver (09_xx_xx)
 
 use super::super::*;
-use crate::{
-    task::{scheduler::Timer, Task},
-    *,
-};
-use alloc::sync::Arc;
-use core::{mem::transmute, pin::Pin, time::Duration};
+use crate::task::{scheduler::Timer, Task};
+use crate::*;
+use core::mem::transmute;
+use core::pin::Pin;
+use core::time::Duration;
 use futures_util::Future;
 
 pub struct UsbHubStarter;
@@ -38,7 +37,7 @@ impl UsbHubStarter {
         };
         let ep = endpoint.address();
         let ps = endpoint.descriptor().max_packet_size();
-        if ps > 8 {
+        if ps > UsbLength(8) {
             return Err(UsbError::InvalidDescriptor);
         }
         device.configure_endpoint(endpoint.descriptor()).unwrap();
@@ -73,11 +72,11 @@ pub struct UsbHub2Driver {
     device: Arc<UsbDeviceContext>,
     hub_desc: Usb2HubDescriptor,
     ep: UsbEndpointAddress,
-    ps: u16,
+    ps: UsbLength,
 }
 
 impl UsbHub2Driver {
-    async fn _start_hub(device: Arc<UsbDeviceContext>, ep: UsbEndpointAddress, ps: u16) {
+    async fn _start_hub(device: Arc<UsbDeviceContext>, ep: UsbEndpointAddress, ps: UsbLength) {
         let is_mtt = device.device().class() == UsbClass::HUB_HS_MTT;
 
         let hub_desc: Usb2HubDescriptor = match UsbHubCommon::get_hub_descriptor(&device, 0).await {
@@ -137,7 +136,7 @@ impl UsbHub2Driver {
         loop {
             match self
                 .device
-                .read_slice(self.ep, &mut port_event, 1, self.ps as usize)
+                .read_slice(self.ep, &mut port_event, UsbLength(1), self.ps)
                 .await
             {
                 Ok(_) => {
@@ -279,11 +278,11 @@ pub struct UsbHub3Driver {
     device: Arc<UsbDeviceContext>,
     hub_desc: Usb3HubDescriptor,
     ep: UsbEndpointAddress,
-    ps: u16,
+    ps: UsbLength,
 }
 
 impl UsbHub3Driver {
-    async fn _start_hub(device: Arc<UsbDeviceContext>, ep: UsbEndpointAddress, ps: u16) {
+    async fn _start_hub(device: Arc<UsbDeviceContext>, ep: UsbEndpointAddress, ps: UsbLength) {
         let hub_desc: Usb3HubDescriptor = match UsbHubCommon::get_hub_descriptor(&device, 0).await {
             Ok(v) => v,
             Err(_err) => {
@@ -334,7 +333,7 @@ impl UsbHub3Driver {
         loop {
             match self
                 .device
-                .read_slice(self.ep, &mut port_event, 1, self.ps as usize)
+                .read_slice(self.ep, &mut port_event, UsbLength(1), self.ps)
                 .await
             {
                 Ok(_) => {

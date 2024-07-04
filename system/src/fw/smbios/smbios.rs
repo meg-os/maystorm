@@ -1,11 +1,11 @@
 // System Management BIOS
 
 use crate::*;
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-};
-use core::{ffi::c_void, mem::transmute, ptr::addr_of, slice, str};
+use core::ffi::c_void;
+use core::mem::transmute;
+use core::ptr::addr_of;
+use core::slice;
+use core::str;
 
 /// System Management BIOS Entry Point
 pub struct SmBios {

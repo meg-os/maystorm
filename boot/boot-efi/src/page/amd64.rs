@@ -2,12 +2,10 @@
 
 use super::*;
 use crate::*;
-use bitflags::*;
-use core::{
-    mem::size_of,
-    ptr, slice,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use core::mem::size_of;
+use core::ptr::{self, addr_of_mut};
+use core::slice;
+use core::sync::atomic::{AtomicU64, Ordering};
 
 const N_DIRECT_MAP_GIGA: usize = 4;
 const MAX_REAL_MEMORY: u64 = 0x0000A_0000;
@@ -22,7 +20,7 @@ impl VirtualAddress {
 static mut PM: PageManager = PageManager::new();
 
 pub struct PageManager {
-    pub master_cr3: PhysicalAddress,
+    pub master_page_table: PhysicalAddress,
     pub static_start: AtomicU64,
     pub static_free: AtomicU64,
     pml2k: PageTableEntry,
@@ -31,7 +29,7 @@ pub struct PageManager {
 impl PageManager {
     const fn new() -> Self {
         Self {
-            master_cr3: 0,
+            master_page_table: 0,
             static_start: AtomicU64::new(0),
             static_free: AtomicU64::new(0),
             pml2k: PageTableEntry::empty(),
@@ -86,7 +84,7 @@ impl PageManager {
                     last_pa_4g = last_pa;
                 }
             }
-            if mem_desc.ty.is_conventional_at_runtime() {
+            if mem_desc.ty.is_available_at_runtime() {
                 if last_pa <= MAX_REAL_MEMORY {
                     let base = page_base / 0x1000;
                     let count = page_size / 0x1000;
@@ -131,11 +129,11 @@ impl PageManager {
         info.mmap_len = write_cursor as u32 + 1;
 
         // Minimal Paging
-        let common_attributes = PageAttributes::from(MProtect::all());
+        let common_attributes = PageAttributes::from(MProtect::RWX);
 
         let cr3 = Self::alloc_pages(1);
-        shared.master_cr3 = cr3;
-        info.master_cr3 = cr3;
+        shared.master_page_table = cr3;
+        info.master_page_table = cr3;
         let pml4 = PageTableEntry::from(cr3).table(1);
 
         // 0000_0000_0000_0000 - 0000_0000_FFFF_FFFF Identity Mapping (<4G)
@@ -171,36 +169,11 @@ impl PageManager {
         let pml2kp = Self::alloc_pages(1);
         shared.pml2k = PageTableEntry::new(pml2kp, common_attributes);
         pml3k[kernel_base.index_of(3)] = shared.pml2k;
-
-        // // vram (temp)
-        // let vram_base = info.vram_base;
-        // let vram_size = Self::pages(
-        //     info.vram_stride as u64 * info.screen_height as u64 * 4,
-        //     PageTableEntry::LARGE_PAGE_SIZE,
-        // ) as u64;
-        // let offset = vram_base / PageTableEntry::LARGE_PAGE_SIZE;
-        // for i in 0..vram_size {
-        //     pml2[(offset + i) as usize] = PageTableEntry::new(
-        //         vram_base + i * PageTableEntry::LARGE_PAGE_SIZE,
-        //         common_attributes | PageAttributes::LARGE,
-        //     );
-        // }
-    }
-
-    #[allow(dead_code)]
-    fn debug_unit(val: usize) -> (usize, char) {
-        if val < 0x0020_0000 {
-            (val >> 10, 'K')
-        } else if val < 0x8000_0000 {
-            (val >> 20, 'M')
-        } else {
-            (val >> 30, 'G')
-        }
     }
 
     #[inline]
-    fn shared() -> &'static mut Self {
-        unsafe { &mut PM }
+    fn shared<'a>() -> &'a mut Self {
+        unsafe { &mut *addr_of_mut!(PM) }
     }
 
     fn alloc_pages(pages: usize) -> PhysicalAddress {
@@ -226,7 +199,7 @@ impl PageManager {
 
     fn va_set_l1<'a>(base: VirtualAddress) -> &'a mut PageTableEntry {
         let shared = Self::shared();
-        let common_attributes = PageAttributes::from(MProtect::all());
+        let common_attributes = PageAttributes::from(MProtect::RWX);
 
         let page = (base.0 / PageTableEntry::LARGE_PAGE_SIZE) as usize & PageTableEntry::INDEX_MASK;
         let offset =
@@ -280,35 +253,58 @@ impl PageManager {
     }
 }
 
-bitflags! {
-    pub struct MProtect: u64 {
-        const READ  = 0x4;
-        const WRITE = 0x2;
-        const EXEC  = 0x1;
-        const NONE  = 0x0;
+#[derive(Debug, Clone, Copy)]
+pub struct PageAttributes(u64);
+
+impl PageAttributes {
+    pub const PRESENT: Self = Self(0x0000_0000_0000_0001);
+    pub const WRITE: Self = Self(0x0000_0000_0000_0002);
+    pub const USER: Self = Self(0x0000_0000_0000_0004);
+    pub const PWT: Self = Self(0x0000_0000_0000_0008);
+    pub const PCD: Self = Self(0x0000_0000_0000_0010);
+    pub const ACCESS: Self = Self(0x0000_0000_0000_0020);
+    pub const DIRTY: Self = Self(0x0000_0000_0000_0040);
+    pub const PAT: Self = Self(0x0000_0000_0000_0080);
+    pub const LARGE: Self = Self(0x0000_0000_0000_0080);
+    pub const GLOBAL: Self = Self(0x0000_0000_0000_0100);
+    // pub const AVL: Self = Self(0x0000_0000_0000_0E00);
+    pub const LARGE_PAT: Self = Self(0x0000_0000_0000_1000);
+    pub const NO_EXECUTE: Self = Self(0x8000_0000_0000_0000);
+
+    #[inline]
+    pub fn from_bits_truncate(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub const fn bits(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn empty() -> Self {
+        Self(0)
     }
 }
 
-bitflags! {
-    #[derive(Debug, Clone, Copy)]
-    struct PageAttributes: u64 {
-        const PRESENT       = 0x0000_0000_0000_0001;
-        const WRITE         = 0x0000_0000_0000_0002;
-        const USER          = 0x0000_0000_0000_0004;
-        const PWT           = 0x0000_0000_0000_0008;
-        const PCD           = 0x0000_0000_0000_0010;
-        const ACCESS        = 0x0000_0000_0000_0020;
-        const DIRTY         = 0x0000_0000_0000_0040;
-        const PAT           = 0x0000_0000_0000_0080;
-        const LARGE         = 0x0000_0000_0000_0080;
-        const GLOBAL        = 0x0000_0000_0000_0100;
-        // const AVL           = 0x0000_0000_0000_0E00;
-        const LARGE_PAT     = 0x0000_0000_0000_1000;
-        const NO_EXECUTE    = 0x8000_0000_0000_0000;
+impl BitOr<Self> for PageAttributes {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign<Self> for PageAttributes {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
     }
 }
 
 impl From<MProtect> for PageAttributes {
+    #[inline]
     fn from(prot: MProtect) -> Self {
         let mut value = PageAttributes::empty();
         if prot.contains(MProtect::READ) {

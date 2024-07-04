@@ -1,20 +1,20 @@
-use crate::{
-    arch::cpu::*,
-    io::{screen::*, tty::*},
-    task::scheduler::*,
-    *,
-};
-use bootprot::BootInfo;
-use core::{
-    cell::UnsafeCell,
-    ffi::c_void,
-    fmt,
-    mem::{transmute, MaybeUninit},
-    sync::atomic::*,
-};
-use megstd::{drawing::*, time::SystemTime, Arc, Box, String, Vec};
+//! MEG-OS Kernel
+// (c) 2020 Nerry
+// License: MIT
 
-/// A Kernel of MEG-OS codename Maystorm
+use crate::arch::cpu::*;
+use crate::io::{screen::*, tty::*};
+use crate::task::scheduler::*;
+use crate::*;
+use bootprot::{BootFlags, BootInfo};
+use core::cell::UnsafeCell;
+use core::ffi::c_void;
+use core::fmt;
+use core::mem::{transmute, MaybeUninit};
+use core::sync::atomic::*;
+use megstd::drawing::*;
+use megstd::time::SystemTime;
+
 #[allow(dead_code)]
 pub struct System {
     /// Current device information
@@ -44,10 +44,10 @@ static mut SYSTEM: UnsafeCell<System> = UnsafeCell::new(System::new());
 
 impl System {
     const SYSTEM_NAME: &'static str = "MEG-OS";
-    const SYSTEM_CODENAME: &'static str = "Cherry";
+    const SYSTEM_CODENAME: &'static str = "codename Maystorm-13";
     const SYSTEM_SHORT_NAME: &'static str = "myos";
     const RELEASE: &'static str = "alpha";
-    const VERSION: Version<'static> = Version::new(0, 12, 0, Self::RELEASE);
+    const VERSION: Version<'static> = Version::new(0, 13, 0, Self::RELEASE);
 
     #[inline]
     const fn new() -> Self {
@@ -66,7 +66,7 @@ impl System {
     }
 
     /// Initialize the system
-    pub unsafe fn init(info: &BootInfo, f: fn() -> ()) -> ! {
+    pub unsafe fn init(info: &BootInfo, main: fn() -> ()) -> ! {
         assert_call_once!();
 
         let shared = SYSTEM.get_mut();
@@ -90,7 +90,7 @@ impl System {
             ))
             .unwrap()
             .get() as *mut TrueColor;
-            let size = Size::new(info.screen_width as isize, info.screen_height as isize);
+            let size = Size::new(info.screen_width as u32, info.screen_height as u32);
             let screen = BitmapScreen::new(BitmapRefMut32::from_static(base, size, stride));
             screen
                 .set_orientation(ScreenOrientation::Landscape)
@@ -116,36 +116,17 @@ impl System {
 
         arch::Arch::init_first(info);
 
-        Scheduler::start(Self::init_second, f as usize);
+        Scheduler::start(Self::_init_second, main as usize);
     }
 
     /// The second half of the system initialization
-    fn init_second(args: usize) {
+    fn _init_second(args: usize) {
         assert_call_once!();
 
         let shared = Self::shared();
 
-        if true {
-            let device = System::current_device();
-
-            let bytes = device.total_memory_size();
-            let gb = bytes >> 30;
-            let mb = (100 * (bytes & 0x3FFF_FFFF)) / 0x4000_0000;
-            log!(
-                "{} v{} (codename {}) {:?} {}C/{}T Memory {}.{:02}GB",
-                System::name(),
-                System::version(),
-                System::codename(),
-                device.processor_system_type(),
-                device.num_of_physical_cpus(),
-                device.num_of_logical_cpus(),
-                gb,
-                mb
-            );
-        }
-
         unsafe {
-            log::EventManager::init();
+            utils::EventManager::init();
             Scheduler::init_second();
             mem::MemoryManager::init_second();
             fs::FileManager::init(shared.initrd_base.direct_map(), shared.initrd_size);
@@ -164,7 +145,7 @@ impl System {
 
             rt::RuntimeEnvironment::init();
 
-            user::userenv::UserEnv::start(transmute(args));
+            init::SysInit::start(transmute(args));
         }
     }
 
@@ -338,14 +319,96 @@ impl System {
             panic!("Multiple calls are not allowed");
         }
     }
+
+    pub fn date_to_integer(y: u16, m: u8, d: u8) -> u32 {
+        if y < 1970 {
+            return 0;
+        }
+        let m = match Month::try_from(m) {
+            Some(v) => v,
+            None => return 0,
+        };
+
+        let mut acc = (y as u32 * 365) + ((y / 4) - (y / 100) + (y / 400)) as u32;
+
+        let md_tbl = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+        acc += md_tbl[m as usize];
+        if m > Month::Feb && ((y % 400) == 0 || (y % 4) == 0 && (y % 100) != 0) {
+            acc += 1;
+        }
+
+        acc += d as u32;
+
+        acc - 719528 - 1
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Month {
+    Jan,
+    Feb,
+    Mar,
+    Apr,
+    May,
+    Jun,
+    Jul,
+    Aug,
+    Sep,
+    Oct,
+    Nov,
+    Dec,
+}
+
+impl Month {
+    #[inline]
+    fn try_from(v: u8) -> Option<Self> {
+        match v {
+            1 => Some(Self::Jan),
+            2 => Some(Self::Feb),
+            3 => Some(Self::Mar),
+            4 => Some(Self::Apr),
+            5 => Some(Self::May),
+            6 => Some(Self::Jun),
+            7 => Some(Self::Jul),
+            8 => Some(Self::Aug),
+            9 => Some(Self::Sep),
+            10 => Some(Self::Oct),
+            11 => Some(Self::Nov),
+            12 => Some(Self::Dec),
+            _ => None,
+        }
+    }
 }
 
 #[macro_export]
 macro_rules! assert_call_once {
     () => {
         static MUTEX: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
-        System::assert_call_once(&MUTEX);
+        crate::system::System::assert_call_once(&MUTEX);
     };
+}
+
+static PANIC_GLOBAL_LOCK: Spinlock = Spinlock::new();
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    unsafe {
+        Hal::cpu().disable_interrupt();
+        task::scheduler::Scheduler::freeze(true);
+        PANIC_GLOBAL_LOCK.synchronized(|| {
+            let stdout = System::log();
+            stdout.set_attribute(0x4F);
+            if let Some(thread) = task::scheduler::Scheduler::current_thread() {
+                if let Some(name) = thread.name() {
+                    let _ = write!(stdout, "thread '{}' ", name);
+                } else {
+                    let _ = write!(stdout, "thread {} ", thread.as_usize());
+                }
+            }
+            let _ = writeln!(stdout, "{}", info);
+        });
+        Hal::cpu().stop();
+    }
 }
 
 pub struct DeviceInfo {

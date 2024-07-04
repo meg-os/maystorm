@@ -1,16 +1,19 @@
 // impl OsString for MEG-OS
 // Most of them are clones of Rust's original definition.
 
-use crate::*;
-use alloc::borrow::{Cow, ToOwned};
+use crate::prelude::*;
+use alloc::borrow::Cow;
 use alloc::collections::TryReserveError;
-use core::{
-    cmp, fmt,
-    hash::{Hash, Hasher},
-    mem, ops, str,
-};
+use core::borrow::Borrow;
+use core::cmp;
+use core::fmt;
+use core::hash::{Hash, Hasher};
+use core::mem;
+use core::ops::{self, Deref, DerefMut};
+use core::str;
 
 #[repr(transparent)]
+#[derive(Eq)]
 pub struct OsStr {
     inner: Slice,
 }
@@ -54,7 +57,7 @@ impl OsStr {
     }
 
     #[inline]
-    pub fn into_os_string(self: Box<OsStr>) -> OsString {
+    pub fn into_os_string(&self) -> OsString {
         OsString {
             inner: self.inner.to_owned(),
         }
@@ -103,8 +106,6 @@ impl PartialEq<OsStr> for str {
     }
 }
 
-impl Eq for OsStr {}
-
 impl PartialOrd for OsStr {
     #[inline]
     fn partial_cmp(&self, other: &OsStr) -> Option<cmp::Ordering> {
@@ -149,8 +150,17 @@ impl Hash for OsStr {
     }
 }
 
+impl ToOwned for OsStr {
+    type Owned = OsString;
+
+    #[inline]
+    fn to_owned(&self) -> Self::Owned {
+        self.to_os_string()
+    }
+}
+
 #[repr(transparent)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OsString {
     inner: Buf,
 }
@@ -212,9 +222,22 @@ impl OsString {
         let rw = Box::into_raw(self.inner.into_box()) as *mut OsStr;
         unsafe { Box::from_raw(rw) }
     }
+
+    #[inline]
+    pub(crate) fn as_mut_vec(&mut self) -> &mut Vec<u8> {
+        &mut self.inner.inner
+    }
+
+    pub fn into_string(self) -> Result<String, OsString> {
+        String::from_utf8(self.inner.inner).map_err(|e| Self {
+            inner: Buf {
+                inner: e.into_bytes(),
+            },
+        })
+    }
 }
 
-impl ops::Deref for OsString {
+impl Deref for OsString {
     type Target = OsStr;
 
     #[inline]
@@ -223,7 +246,7 @@ impl ops::Deref for OsString {
     }
 }
 
-impl ops::DerefMut for OsString {
+impl DerefMut for OsString {
     #[inline]
     fn deref_mut(&mut self) -> &mut OsStr {
         &mut self[..]
@@ -286,13 +309,21 @@ impl fmt::Debug for OsString {
     }
 }
 
+impl Borrow<OsStr> for OsString {
+    #[inline]
+    fn borrow(&self) -> &OsStr {
+        self.as_os_str()
+    }
+}
+
 #[repr(transparent)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Slice {
     pub inner: [u8],
 }
 
 #[repr(transparent)]
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Buf {
     pub inner: Vec<u8>,
 }

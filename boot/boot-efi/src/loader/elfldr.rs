@@ -2,7 +2,8 @@
 
 use super::*;
 use crate::page::*;
-use core::{intrinsics::transmute, ptr::copy_nonoverlapping};
+use core::intrinsics::transmute;
+use core::ptr::copy_nonoverlapping;
 use myelf::*;
 
 pub struct ElfLoader<'a> {
@@ -105,8 +106,7 @@ impl ImageLoader for ElfLoader<'_> {
                     let va = VirtualAddress(item.p_vaddr & !page_mask);
                     let size = ((item.p_memsz + item.p_vaddr - va.as_u64() + page_mask)
                         & !page_mask) as usize;
-                    let prot = MProtect::from_bits_truncate(item.p_flags as u64);
-                    PageManager::vprotect(va, size, prot);
+                    PageManager::vprotect(va, size, item.p_flags);
                 }
             }
 

@@ -4,13 +4,11 @@
 
 A hobby operating system written in Rust that supports WebAssembly.
 
-* [Documentation for megstd](https://neri.github.io/maystorm/megstd/)
-
 ## Feature
 
 * A hobby operating system written in Rust
 * Not a POSIX clone system
-  * For example, the contents of the path /dev/ are dynamically generated on this operating system.
+  * Designed for use by a single user
 * Supports applications in WebAssembly format
 
 ## Requirements
@@ -24,6 +22,7 @@ A hobby operating system written in Rust that supports WebAssembly.
 ## Build Environment
 
 * Rust nightly
+  * `rustup target add wasm32-unknown-unknown`
 * nasm
 * qemu + ovmf (optional)
 
@@ -49,6 +48,7 @@ The latest version is recommended whenever possible.
 
 ## HOE: Haribote-OS Emulation Subsystem
 
+* Some uncompressed Haribote-OS apps will work; some apps may not work due to different basic OS behaviour.
 * This subsystem may be replaced by another implementation in the future.
 
 ## History
@@ -61,7 +61,7 @@ The latest version is recommended whenever possible.
 
 MIT License
 
-&copy; 2020-2023 MEG-OS Project.
+&copy; 2020-2024 MEG-OS Project.
 
 ### Wall paper
 

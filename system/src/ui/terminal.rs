@@ -1,19 +1,21 @@
-use crate::{io::tty::*, ui::font::*, ui::window::*, *};
-use alloc::boxed::Box;
-use core::{
-    fmt::Write,
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicUsize, Ordering},
-    task::{Context, Poll},
-};
+use crate::io::tty::*;
+use crate::ui::font::*;
+use crate::ui::window::*;
+use crate::*;
+use core::future::Future;
+use core::pin::Pin;
+use core::sync::atomic::{AtomicUsize, Ordering};
+use core::task::{Context, Poll};
 use megstd::drawing::*;
 
 const DEFAULT_INSETS: EdgeInsets = EdgeInsets::new(0, 0, 0, 0);
-// const DEFAULT_ATTRIBUTE: u8 = 0x07;
-// const BG_ALPHA: Alpha8 = Alpha8(0xE0);
-const DEFAULT_ATTRIBUTE: u8 = 0xF8;
-const BG_ALPHA: Alpha8 = Alpha8::OPAQUE;
+
+const DEFAULT_ATTRIBUTE: u8 = 0x07;
+// const DEFAULT_ATTRIBUTE: u8 = 0xF8;
+
+const BG_ALPHA: Alpha8 = Alpha8::new(0xC0);
+// const BG_ALPHA: Alpha8 = Alpha8::new(0xE0);
+// const BG_ALPHA: Alpha8 = Alpha8::OPAQUE;
 
 static TA: TerminalAgent = TerminalAgent::new();
 
@@ -57,17 +59,16 @@ pub struct Terminal {
     window: WindowHandle,
     alpha: Alpha8,
     font: FontDescriptor,
-    cols: usize,
-    rows: usize,
+    cols: u32,
+    rows: u32,
     insets: EdgeInsets,
-    x: usize,
-    y: usize,
+    x: u32,
+    y: u32,
     default_attribute: u8,
     attribute: u8,
     fg_color: Color,
     bg_color: Color,
     is_cursor_enabled: bool,
-    font_cache: Option<OwnedBitmap32>,
     palette: [TrueColor; 16],
 }
 
@@ -105,17 +106,12 @@ impl Terminal {
         } else {
             DEFAULT_ATTRIBUTE
         };
-        let alpha = if alpha.is_transparent() {
-            BG_ALPHA
-        } else {
-            alpha
-        };
         let palette = *palette.unwrap_or(&Self::DEFAULT_PALETTE);
         let (fg_color, bg_color) = Self::_split_attr(&palette, attribute, alpha);
 
         let rect = window.content_size().bounds().insets_by(insets);
-        let cols = (rect.width() / font.em_width()) as usize;
-        let rows = (rect.height() / font.line_height()) as usize;
+        let cols = rect.width() / font.em_width();
+        let rows = rect.height() / font.line_height();
 
         Self {
             window,
@@ -131,14 +127,13 @@ impl Terminal {
             fg_color,
             bg_color,
             is_cursor_enabled: true,
-            font_cache: Self::_fill_cache(&font),
             palette,
         }
     }
 
     pub fn new(
-        cols: usize,
-        rows: usize,
+        cols: u32,
+        rows: u32,
         font: FontDescriptor,
         palette: Option<[TrueColor; 16]>,
     ) -> Self {
@@ -150,20 +145,17 @@ impl Terminal {
 
         let n_instances = TerminalAgent::next_instance();
         let screen_insets = WindowManager::screen_insets();
-        let window_size = Size::new(
-            font.em_width() * cols as isize,
-            font.line_height() * rows as isize,
-        ) + insets;
+        let window_size = Size::new(font.em_width() * cols, font.line_height() * rows) + insets;
 
         let window = RawWindowBuilder::new()
             .frame(Rect::new(
-                screen_insets.left + 16 + 24 * n_instances as isize,
-                screen_insets.top + 16 + 24 * n_instances as isize,
+                screen_insets.left + 16 + 24 * n_instances as i32,
+                screen_insets.top + 16 + 24 * n_instances as i32,
                 window_size.width,
                 window_size.height,
             ))
             .bg_color(bg_color)
-            // .style_add(WindowStyle::DARK_MODE)
+            .style_add(WindowStyle::DARK_MODE)
             .build("Terminal");
 
         Self {
@@ -180,28 +172,8 @@ impl Terminal {
             fg_color,
             bg_color,
             is_cursor_enabled: true,
-            font_cache: Self::_fill_cache(&font),
             palette,
         }
-    }
-
-    fn _fill_cache(_font: &FontDescriptor) -> Option<OwnedBitmap32> {
-        return None;
-        // if font.is_scalable() {
-        //     let font_size = Size::new(font.em_width(), font.line_height());
-        //     let mut bitmap =
-        //         OwnedBitmap32::new(font_size * Size::new(256, 1), TrueColor::TRANSPARENT);
-        //     {
-        //         let mut bitmap = Bitmap::from(bitmap.as_mut());
-        //         for i in 32..128 {
-        //             let origin = Point::new(font_size.width * i, 0);
-        //             font.draw_char(i as u8 as char, &mut bitmap, origin, Color::LIGHT_BLUE);
-        //         }
-        //     }
-        //     Some(bitmap)
-        // } else {
-        //     None
-        // }
     }
 
     fn split_attr(&self, val: u8, alpha: Alpha8) -> (Color, Color) {
@@ -219,8 +191,8 @@ impl Terminal {
         let h = self.font.line_height();
 
         let frame = Rect::from(self.window.content_size()).insets_by(self.insets);
-        let rect = Rect::new(0, h, frame.width(), frame.height() - h);
-        let rect2 = Rect::new(0, frame.height() - h, frame.width(), h);
+        let rect = Rect::new(0, h as i32, frame.width(), frame.height() - h);
+        let rect2 = Rect::new(0, frame.height() as i32 - h as i32, frame.width(), h);
         self.window
             .draw_in_rect(frame, |bitmap| {
                 bitmap.copy(Point::default(), rect);
@@ -231,6 +203,10 @@ impl Terminal {
     }
 
     fn put_char(&mut self, c: char) -> Option<Rect> {
+        if self.window.validate().is_none() {
+            return None;
+        }
+
         match c {
             '\x08' => {
                 if self.x > 0 {
@@ -271,28 +247,16 @@ impl Terminal {
                 }
 
                 let rect = Rect::new(
-                    self.insets.left + self.x as isize * w,
-                    self.insets.top + self.y as isize * h,
+                    self.insets.left + (self.x * w) as i32,
+                    self.insets.top + (self.y * h) as i32,
                     w,
                     h,
                 );
                 self.window
                     .draw_in_rect(rect, |bitmap| {
                         bitmap.fill_rect(bitmap.bounds(), self.bg_color);
-
-                        if let Some(font_cache) = self.font_cache.as_ref() {
-                            let font_cache = BitmapRef::from(font_cache.as_ref());
-                            let rect = Rect::new(w * c as isize, 0, w, h);
-                            bitmap.blt_transparent(
-                                &font_cache,
-                                Point::default(),
-                                rect,
-                                IndexedColor::KEY_COLOR,
-                            );
-                        } else {
-                            self.font
-                                .draw_char(c, bitmap, Point::default(), self.fg_color);
-                        }
+                        self.font
+                            .draw_char(c, bitmap, Point::default(), self.fg_color);
                     })
                     .unwrap();
 
@@ -320,16 +284,20 @@ impl Terminal {
     }
 
     fn set_needs_update_cursor(&mut self) {
+        if self.window.validate().is_none() {
+            return;
+        }
+
         let w = self.font.em_width();
         let h = self.font.line_height();
         let dims = self.dims();
-        if self.x >= dims.0 as usize || self.y >= dims.1 as usize {
+        if self.x >= dims.0 || self.y >= dims.1 {
             return;
         }
 
         let rect = Rect::new(
-            self.insets.left + w * self.x as isize,
-            self.insets.top + h * self.y as isize,
+            self.insets.left + (w * self.x) as i32,
+            self.insets.top + (h * self.y) as i32,
             w,
             h,
         );
@@ -362,13 +330,16 @@ impl TtyRead for Terminal {
         &self,
     ) -> core::pin::Pin<Box<dyn core::future::Future<Output = TtyReadResult> + '_>> {
         Box::pin(ConsoleReader {
-            window: self.window,
+            window: self.window.clone(),
         })
     }
 }
 
 impl TtyWrite for Terminal {
     fn reset(&mut self) -> Result<(), TtyError> {
+        if self.window.validate().is_none() {
+            return Ok(());
+        }
         let rect = self.window.content_size().into();
         self.window
             .draw_in_rect(rect, |bitmap| {
@@ -380,18 +351,18 @@ impl TtyWrite for Terminal {
         Ok(())
     }
 
-    fn dims(&self) -> (isize, isize) {
-        (self.cols as isize, self.rows as isize)
+    fn dims(&self) -> (u32, u32) {
+        (self.cols, self.rows)
     }
 
-    fn cursor_position(&self) -> (isize, isize) {
-        (self.x as isize, self.y as isize)
+    fn cursor_position(&self) -> (u32, u32) {
+        (self.x, self.y)
     }
 
-    fn set_cursor_position(&mut self, x: isize, y: isize) {
+    fn set_cursor_position(&mut self, x: u32, y: u32) {
         let old_cursor = self.set_cursor_enabled(false);
-        self.x = x as usize;
-        self.y = y as usize;
+        self.x = x;
+        self.y = y;
         self.set_cursor_enabled(old_cursor);
     }
 

@@ -1,15 +1,10 @@
 //! Concurrent First In First Out
 
-use crate::{
-    sync::semaphore::{AsyncSemaphore, Semaphore},
-    *,
-};
-use alloc::{boxed::Box, sync::Arc};
-use core::{
-    mem::{self, MaybeUninit},
-    pin::Pin,
-    {cell::UnsafeCell, sync::atomic::*},
-};
+use crate::sync::semaphore::{AsyncSemaphore, Semaphore};
+use crate::*;
+use core::mem::{self, MaybeUninit};
+use core::pin::Pin;
+use core::{cell::UnsafeCell, sync::atomic::*};
 
 pub struct EventQueue<T> {
     fifo: ConcurrentFifo<T>,

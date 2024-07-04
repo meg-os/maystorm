@@ -1,22 +1,28 @@
 //! Runtime Environment and Personalities
 
-use crate::{task::scheduler::*, *};
-use alloc::{boxed::Box, string::String, string::*, vec::Vec};
-use core::{cell::UnsafeCell, ffi::c_void};
+use crate::fs::*;
+use crate::task::scheduler::*;
+use crate::*;
+use core::cell::UnsafeCell;
+use core::ffi::c_void;
+use megstd::io::{Error, ErrorKind, Read};
+use megstd::path::Path;
 use megstd::uuid::{Identify, Uuid};
 
 pub mod arle;
 
-pub mod myos;
+#[path = "wasm/wasm.rs"]
+pub mod wasm;
 
 #[cfg(target_arch = "x86_64")]
+#[path = "haribote/hoe.rs"]
 pub mod haribote;
 
 static mut RE: UnsafeCell<RuntimeEnvironment> = UnsafeCell::new(RuntimeEnvironment::new());
 
 pub struct RuntimeEnvironment {
     path_ext: Vec<String>,
-    image_loaders: Vec<Box<dyn BinaryRecognizer>>,
+    image_loaders: Vec<Box<dyn BinaryLoader>>,
 }
 
 impl RuntimeEnvironment {
@@ -34,17 +40,17 @@ impl RuntimeEnvironment {
 
         let shared = &mut *RE.get();
 
-        shared.add_image("bin", arle::ArleRecognizer::new());
+        shared.add_image(arle::ArleBinaryLoader::new());
 
-        shared.add_image("wasm", myos::WasmRecognizer::new());
+        shared.add_image(wasm::WasmBinaryLoader::new());
 
         #[cfg(target_arch = "x86_64")]
-        shared.add_image("hrb", haribote::HrbRecognizer::new());
+        shared.add_image(haribote::HrbBinaryLoader::new());
     }
 
     #[inline]
-    fn add_image(&mut self, ext: &str, loader: Box<dyn BinaryRecognizer>) {
-        self.path_ext.push(ext.to_string());
+    fn add_image(&mut self, loader: Box<dyn BinaryLoader>) {
+        self.path_ext.push(loader.preferred_extension().to_string());
         self.image_loaders.push(loader);
     }
 
@@ -58,15 +64,31 @@ impl RuntimeEnvironment {
         Self::shared().path_ext.iter()
     }
 
-    #[inline]
-    pub fn recognize(blob: &[u8]) -> Option<Box<dyn BinaryLoader>> {
-        let shared = Self::shared();
-        for recognizer in &shared.image_loaders {
-            if let Some(loader) = recognizer.recognize(blob) {
-                return Some(loader);
-            }
+    pub fn spawn(path: &str, args: &[&str]) -> Result<ProcessId, Error> {
+        let mut fcb = FileManager::open(path, OpenOptions::new().read(true))?;
+        let stat = fcb.fstat().unwrap();
+        if !stat.file_type().is_file() {
+            return Err(ErrorKind::PermissionDenied.into());
         }
-        None
+        let file_size = stat.len() as usize;
+        if file_size > 0 {
+            let mut vec = Vec::with_capacity(file_size);
+            fcb.read_to_end(&mut vec)?;
+            let blob = vec.as_slice();
+            let shared = Self::shared();
+            for loader in &shared.image_loaders {
+                if loader.recognize(blob) {
+                    let lpc = Path::new(path)
+                        .file_name()
+                        .and_then(|v| v.to_str())
+                        .unwrap_or_default();
+                    return loader.spawn(blob, LoadedImageOption::new(lpc, args));
+                }
+            }
+            return Err(ErrorKind::ExecFormatError.into());
+        } else {
+            return Err(ErrorKind::ExecFormatError.into());
+        }
     }
 
     #[inline]
@@ -116,23 +138,28 @@ impl PersonalityContext {
     }
 }
 
-pub trait BinaryRecognizer {
-    /// Recognizes the binary format and returns the corresponding binary loader.
-    fn recognize(&self, blob: &[u8]) -> Option<Box<dyn BinaryLoader>>;
-}
-
 pub trait BinaryLoader {
-    fn option(&mut self) -> &mut LoadedImageOption;
+    fn preferred_extension<'a>(&self) -> &'a str;
 
-    fn load(&mut self, blob: &[u8]) -> Result<(), ()>;
+    fn recognize(&self, blob: &[u8]) -> bool;
 
-    fn invoke_start(self: Box<Self>) -> Option<ProcessId>;
+    fn spawn(&self, blob: &[u8], lio: LoadedImageOption) -> Result<ProcessId, Error>;
 }
 
 #[derive(Debug, Default)]
 pub struct LoadedImageOption {
     pub name: String,
     pub argv: Vec<String>,
+}
+
+impl LoadedImageOption {
+    #[inline]
+    pub fn new(name: &str, args: &[&str]) -> Self {
+        Self {
+            name: name.to_string(),
+            argv: args.iter().map(|v| v.to_string()).collect(),
+        }
+    }
 }
 
 /// Contextual data for legacy applications

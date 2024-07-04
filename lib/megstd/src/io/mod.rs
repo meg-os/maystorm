@@ -1,7 +1,8 @@
+use crate::prelude::*;
+
 pub mod hid;
 
 mod error;
-use alloc::vec::Vec;
 pub use error::*;
 
 pub type Result<T> = core::result::Result<T, Error>;

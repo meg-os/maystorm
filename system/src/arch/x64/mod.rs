@@ -1,20 +1,15 @@
-pub mod cpu;
-
-#[doc(hidden)]
 pub mod apic;
-#[doc(hidden)]
+pub mod cpu;
 pub mod hpet;
 pub mod page;
-#[doc(hidden)]
 pub mod ps2;
-#[doc(hidden)]
 pub mod rtc;
 
-#[doc(hidden)]
-pub mod hal_x64;
-pub use hal_x64 as hal;
+#[path = "hal_x64.rs"]
+pub mod hal;
 
-use crate::{assert_call_once, system::*};
+use crate::assert_call_once;
+use crate::system::*;
 use bootprot::BootInfo;
 use core::arch::asm;
 use megstd::time::SystemTime;

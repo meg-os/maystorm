@@ -1,6 +1,6 @@
 use crate::fs::{devfs::*, *};
-use alloc::borrow::ToOwned;
-use megstd::{io::Result, Arc, String};
+use crate::*;
+use megstd::io::Result;
 
 /// Random Device `/dev/random`
 pub struct Random;

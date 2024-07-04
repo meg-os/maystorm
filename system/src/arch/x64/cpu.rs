@@ -1,23 +1,28 @@
 use super::apic::*;
-use crate::{
-    rt::{LegacyAppContext, RuntimeEnvironment},
-    system::{ProcessorCoreType, ProcessorIndex},
-    task::scheduler::Scheduler,
-    *,
-};
-use alloc::boxed::Box;
-use core::{
-    arch::{asm, x86_64::__cpuid_count},
-    cell::UnsafeCell,
-    convert::TryFrom,
-    ffi::c_void,
-    mem::{size_of, transmute},
-    sync::atomic::*,
-};
-use megstd::Vec;
+use crate::rt::{LegacyAppContext, RuntimeEnvironment};
+use crate::system::{ProcessorCoreType, System};
+use crate::task::scheduler::Scheduler;
+use crate::*;
+use bootprot::BootInfo;
+use core::arch::asm;
+use core::cell::UnsafeCell;
+use core::ffi::c_void;
+use core::mem::size_of;
+use core::sync::atomic::*;
 use paste::paste;
+use x86::cpuid::{cpuid, cpuid_count, Feature, NativeModelCoreType};
+use x86::gpr::Rflags;
+use x86::prot::*;
 
 static mut SHARED_CPU: UnsafeCell<SharedCpu> = UnsafeCell::new(SharedCpu::new());
+
+pub const KERNEL_CSEL: Selector = Selector::new(1, RPL0);
+pub const KERNEL_DSEL: Selector = Selector::new(2, RPL0);
+pub const LEGACY_CSEL: Selector = Selector::new(3, RPL3);
+pub const LEGACY_DSEL: Selector = Selector::new(4, RPL3);
+pub const USER_CSEL: Selector = Selector::new(5, RPL3);
+pub const USER_DSEL: Selector = Selector::new(6, RPL3);
+pub const SYSTEM_TSS: Selector = Selector::new(8, RPL0);
 
 pub struct Cpu {
     apic_id: ApicId,
@@ -69,20 +74,20 @@ impl Cpu {
 
         InterruptDescriptorTable::init();
 
-        shared.max_cpuid_level_0 = __cpuid_count(0, 0).eax;
-        shared.max_cpuid_level_8 = __cpuid_count(0x8000_0000, 0).eax;
+        shared.max_cpuid_level_0 = cpuid(0).eax;
+        shared.max_cpuid_level_8 = cpuid(0x8000_0000).eax;
 
         if shared.max_cpuid_level_0 >= 0x0B {
-            if Feature::F07D(F070D::HYBRID).has_feature() {
+            if Feature::HYBRID.exists() {
                 shared.is_hybrid.store(true, Ordering::SeqCst);
             }
             if shared.max_cpuid_level_0 >= 0x1F {
-                let cpuid1f = __cpuid_count(0x1F, 0);
+                let cpuid1f = cpuid(0x1F);
                 if (cpuid1f.ecx & 0xFF00) == 0x0100 {
                     shared.smt_topology = (1 << (cpuid1f.eax & 0x1F)) - 1;
                 }
             } else {
-                let cpuid0b = __cpuid_count(0x0B, 0);
+                let cpuid0b = cpuid(0x0B);
                 if (cpuid0b.ecx & 0xFF00) == 0x0100 {
                     shared.smt_topology = (1 << (cpuid0b.eax & 0x1F)) - 1;
                 }
@@ -90,7 +95,7 @@ impl Cpu {
         }
 
         if shared.max_cpuid_level_8 >= 0x8000_0008 {
-            let cpuid88 = __cpuid_count(0x8000_0008, 0);
+            let cpuid88 = cpuid(0x8000_0008);
             shared.max_physical_address_bits = (cpuid88.eax & 0xFF) as usize;
             shared.max_virtual_address_bits = ((cpuid88.eax >> 8) & 0xFF) as usize;
         }
@@ -108,7 +113,7 @@ impl Cpu {
         let gdt = GlobalDescriptorTable::new();
         InterruptDescriptorTable::load();
 
-        let shared = &*SHARED_CPU.get();
+        // let shared = &*SHARED_CPU.get();
 
         let is_normal = if (apic_id.as_u32() & Self::shared().smt_topology) == 0 {
             true
@@ -122,90 +127,63 @@ impl Cpu {
         );
         let core_type = ProcessorCoreType::new(is_normal, is_efficient);
 
-        let mtrr_items = Mtrr::items().filter(|v| v.is_enabled).collect::<Vec<_>>();
-        let mut mtrr_new = Vec::new();
-        let mtrr_remain = Mtrr::count() - mtrr_items.len();
-        if mtrr_items
-            .iter()
-            .find(|v| v.matches(shared.vram_base) && v.mem_type == Mtrr::WC)
-            .is_none()
-        {
-            // Setting MTRR of VRAM to Write Combining improves drawing performance on some models. (expr)
-            if mtrr_remain > 0
-                && mtrr_items
-                    .iter()
-                    .find(|v| v.matches(shared.vram_base))
-                    .is_none()
-            {
-                // simply add
-                mtrr_new.extend_from_slice(mtrr_items.as_slice());
-                mtrr_new.push(MtrrItem {
-                    base: shared.vram_base,
-                    mask: !(shared.vram_size_min as u64 - 1),
-                    mem_type: Mtrr::WC,
-                    is_enabled: true,
-                });
-            } else if mtrr_remain > 0
-                && shared.vram_base == PhysicalAddress::new(0xC000_0000)
-                && mtrr_items
-                    .iter()
-                    .find(|v| {
-                        v.base == shared.vram_base
-                            && v.matches(PhysicalAddress::new(0xFFFF_FFFF))
-                            && v.mem_type == Mtrr::UC
-                    })
-                    .is_some()
-            {
-                // Some Intel machines have the range C000_0000 to FFFF_FFFF set to UC
-                mtrr_new = mtrr_items
-                    .into_iter()
-                    .filter(|v| !v.matches(shared.vram_base))
-                    .collect();
-                mtrr_new.push(MtrrItem {
-                    base: shared.vram_base,
-                    mask: !0x1FFF_FFFF,
-                    mem_type: Mtrr::WC,
-                    is_enabled: true,
-                });
-                mtrr_new.push(MtrrItem {
-                    base: PhysicalAddress::new(0xE000_0000),
-                    mask: !0x1FFF_FFFF,
-                    mem_type: Mtrr::UC,
-                    is_enabled: true,
-                });
-            } else {
-                // Unknown, giving up
-            }
-            if mtrr_new.len() > 0 {
-                Mtrr::set_items(&mtrr_new);
-            }
-        }
-
-        // log!(
-        //     "MTRR {:04x} {:04x} VRAM {:012x} {:012x} BITS {} {}",
-        //     MSR::IA32_MTRRCAP.read(),
-        //     MSR::IA32_MTRR_DEF_TYPE.read(),
-        //     shared.vram_base,
-        //     shared.vram_size_min - 1,
-        //     shared.max_physical_address_bits,
-        //     shared.max_virtual_address_bits,
-        // );
-        // for (index, mtrr) in Mtrr::items().filter(|v| v.is_enabled).enumerate() {
-        //     log!(
-        //         "MTRR {:02x}.{} {:012x}-{:012x} {:012x} {:?} {}",
-        //         apic_id.0,
-        //         index,
-        //         mtrr.base,
-        //         mtrr.base + (Cpu::physical_address_mask() & !mtrr.mask),
-        //         mtrr.mask,
-        //         mtrr.mem_type,
-        //         mtrr.is_enabled
-        //     );
-        // }
-        // todo!();
-
-        // if Feature::F81C(F81C::WDT).has_feature() {
-        //     MSR::CPU_WATCHDOG_TIMER.write(0);
+        // let mtrr_items = Mtrr::items().filter(|v| v.is_enabled).collect::<Vec<_>>();
+        // let mut mtrr_new = Vec::new();
+        // let mtrr_remain = Mtrr::count() - mtrr_items.len();
+        // if mtrr_items
+        //     .iter()
+        //     .find(|v| v.matches(shared.vram_base) && v.mem_type == Mtrr::WC)
+        //     .is_none()
+        // {
+        //     // Setting MTRR of VRAM to Write Combining improves drawing performance on some models. (expr)
+        //     if mtrr_remain > 0
+        //         && mtrr_items
+        //             .iter()
+        //             .find(|v| v.matches(shared.vram_base))
+        //             .is_none()
+        //     {
+        //         // simply add
+        //         mtrr_new.extend_from_slice(mtrr_items.as_slice());
+        //         mtrr_new.push(MtrrItem {
+        //             base: shared.vram_base,
+        //             mask: !(shared.vram_size_min as u64 - 1),
+        //             mem_type: Mtrr::WC,
+        //             is_enabled: true,
+        //         });
+        //     } else if mtrr_remain > 0
+        //         && shared.vram_base == PhysicalAddress::new(0xC000_0000)
+        //         && mtrr_items
+        //             .iter()
+        //             .find(|v| {
+        //                 v.base == shared.vram_base
+        //                     && v.matches(PhysicalAddress::new(0xFFFF_FFFF))
+        //                     && v.mem_type == Mtrr::UC
+        //             })
+        //             .is_some()
+        //     {
+        //         // Some Intel machines have the range C000_0000 to FFFF_FFFF set to UC
+        //         mtrr_new = mtrr_items
+        //             .into_iter()
+        //             .filter(|v| !v.matches(shared.vram_base))
+        //             .collect();
+        //         mtrr_new.push(MtrrItem {
+        //             base: shared.vram_base,
+        //             mask: !0x1FFF_FFFF,
+        //             mem_type: Mtrr::WC,
+        //             is_enabled: true,
+        //         });
+        //         mtrr_new.push(MtrrItem {
+        //             base: PhysicalAddress::new(0xE000_0000),
+        //             mask: !0x1FFF_FFFF,
+        //             mem_type: Mtrr::UC,
+        //             is_enabled: true,
+        //         });
+        //     } else {
+        //         // Unknown, giving up
+        //     }
+        //     if mtrr_new.len() > 0 {
+        //         Mtrr::set_items(&mtrr_new);
+        //     }
         // }
 
         Box::new(Cpu {
@@ -235,7 +213,7 @@ impl Cpu {
     #[inline]
     pub fn native_model_core_type() -> Option<NativeModelCoreType> {
         if Self::is_hybrid() {
-            let cpuid_1a = unsafe { __cpuid_count(0x1A, 0) };
+            let cpuid_1a = unsafe { cpuid_count(0x1A, 0) };
             NativeModelCoreType::from_u8((cpuid_1a.eax >> 24) as u8)
         } else {
             None
@@ -261,13 +239,11 @@ impl Cpu {
 
     #[inline]
     pub const fn physical_id(&self) -> usize {
-        // TODO: pub
         self.apic_id().as_u32() as usize
     }
 
     #[inline]
     pub const fn processor_type(&self) -> ProcessorCoreType {
-        // TODO: pub
         self.core_type
     }
 
@@ -301,7 +277,7 @@ impl Cpu {
 
     #[allow(dead_code)]
     #[inline]
-    pub unsafe fn out32(port: u16, value: u32) {
+    pub(super) unsafe fn out32(port: u16, value: u32) {
         asm!("out dx, eax", in("dx") port, in("eax") value);
     }
 
@@ -318,36 +294,29 @@ impl Cpu {
         let eax: u32;
         let edx: u32;
         unsafe {
-            asm!("rdtsc", lateout("edx") edx, lateout("eax") eax, options(nomem, nostack));
+            asm!("rdtsc",
+                lateout("edx") edx,
+                lateout("eax") eax,
+                options(nomem, nostack)
+            );
         }
         eax as u64 + edx as u64 * 0x10000_0000
     }
 
     #[inline]
-    pub(super) unsafe fn rdtscp() -> (u64, u32) {
+    pub(super) fn rdtscp() -> (u64, u32) {
         let eax: u32;
         let edx: u32;
         let ecx: u32;
-        asm!(
-            "rdtscp",
-            lateout("eax") eax,
-            lateout("ecx") ecx,
-            lateout("edx") edx,
-            options(nomem, nostack),
-        );
+        unsafe {
+            asm!("rdtscp",
+                lateout("eax") eax,
+                lateout("ecx") ecx,
+                lateout("edx") edx,
+                options(nomem, nostack),
+            );
+        }
         (eax as u64 + edx as u64 * 0x10000_0000, ecx)
-    }
-
-    #[allow(dead_code)]
-    #[inline]
-    pub(super) unsafe fn read_tsc() -> u64 {
-        let (tsc_raw, index) = Self::rdtscp();
-        tsc_raw
-            - ProcessorIndex(index as usize)
-                .get()
-                .unwrap()
-                .tsc_base
-                .load(Ordering::Relaxed)
     }
 
     /// Launch the user mode application.
@@ -391,8 +360,8 @@ impl Cpu {
             xor r15, r15
             iretq
             ",
-            new_ss = in (reg) Selector::USER_DATA.0 as usize,
-            new_cs = in (reg) Selector::USER_CODE.0 as usize,
+            new_ss = in (reg) USER_DSEL.as_usize(),
+            new_cs = in (reg) USER_CSEL.as_usize(),
             new_sp = in (reg) stack_pointer as usize,
             new_ip = in (reg) start as usize,
             new_fl = in (reg) rflags.bits(),
@@ -406,21 +375,22 @@ impl Cpu {
         // Prepare GDT for 32-bit user mode.
         let gdt = GlobalDescriptorTable::current();
         gdt.set_item(
-            Selector::LEGACY_CODE,
+            LEGACY_CSEL,
             DescriptorEntry::code_segment(
                 Linear32(ctx.base_of_code),
                 Limit32(ctx.size_of_code - 1),
-                PrivilegeLevel::User,
-                DefaultSize::Use32,
+                DPL3,
+                USE32,
             ),
         )
         .unwrap();
         gdt.set_item(
-            Selector::LEGACY_DATA,
+            LEGACY_DSEL,
             DescriptorEntry::data_segment(
                 Linear32(ctx.base_of_data),
                 Limit32(ctx.size_of_data - 1),
-                PrivilegeLevel::User,
+                DPL3,
+                true,
             ),
         )
         .unwrap();
@@ -454,8 +424,8 @@ impl Cpu {
             xor edi, edi
             iretq
             ",
-            new_ss = in (reg) Selector::LEGACY_DATA.0 as usize,
-            new_cs = in (reg) Selector::LEGACY_CODE.0 as usize,
+            new_ss = in (reg) LEGACY_DSEL.as_usize(),
+            new_cs = in (reg) LEGACY_CSEL.as_usize(),
             new_sp = in (reg) ctx.stack_pointer as usize,
             new_ip = in (reg) ctx.start as usize,
             new_fl = in (reg) rflags.bits(),
@@ -467,18 +437,15 @@ impl Cpu {
 #[repr(C, align(64))]
 pub struct CpuContextData {
     _regs: [u64; ContextIndex::Max as usize],
-    _fpu: [u8; 512],
 }
 
 macro_rules! context_index {
-    ($name:ident) => {
-        paste! {
-            pub const [<CTX_ $name>] : usize = ContextIndex::$name.to_offset();
-        }
-    };
-    ($name:ident, $($name2:ident),+) => {
-        context_index!{ $name }
-        context_index!{ $($name2),+ }
+    { $( $name:ident , )* } => {
+        $(
+            paste! {
+                pub const [<CTX_ $name>] : usize = ContextIndex::$name.to_offset();
+            }
+        )*
     };
 }
 
@@ -486,18 +453,16 @@ impl CpuContextData {
     pub const SIZE_OF_CONTEXT: usize = 1024;
     pub const SIZE_OF_STACK: usize = 0x10000;
 
-    context_index! { RSP, RBP, RBX, R12, R13, R14, R15, USER_CS_DESC, USER_DS_DESC, TSS_RSP0 }
+    context_index! { RSP, RBP, RBX, R12, R13, R14, R15, USER_CS_DESC, USER_DS_DESC, TSS_RSP0, FPU, }
     pub const CTX_DS: usize = ContextIndex::Segs.to_offset() + 0;
     pub const CTX_ES: usize = ContextIndex::Segs.to_offset() + 2;
     pub const CTX_FS: usize = ContextIndex::Segs.to_offset() + 4;
     pub const CTX_GS: usize = ContextIndex::Segs.to_offset() + 6;
-    pub const CTX_FPU: usize = ContextIndex::Max.to_offset();
 
     #[inline]
     pub const fn new() -> Self {
         Self {
             _regs: [0; ContextIndex::Max as usize],
-            _fpu: [0; 512],
         }
     }
 
@@ -508,12 +473,12 @@ impl CpuContextData {
             mov [{new_sp}], {new_thread}
             mov [{new_sp} + 0x08], {start}
             mov [{new_sp} + 0x10], {arg}
-            mov [{0} + {CTX_RSP}], {new_sp}
+            mov [{self} + {CTX_RSP}], {new_sp}
             xor {temp:e}, {temp:e}
-            mov [{0} + {CTX_USER_CS}], {temp}
-            mov [{0} + {CTX_USER_DS}], {temp}
+            mov [{self} + {CTX_USER_CS}], {temp}
+            mov [{self} + {CTX_USER_DS}], {temp}
             ",
-            in(reg) self,
+            self = in(reg) self,
             new_sp = in(reg) new_sp,
             start = in(reg) start,
             arg = in(reg) arg,
@@ -598,15 +563,15 @@ impl CpuContextData {
             CTX_FPU = const Self::CTX_FPU,
             CTX_TSS_RSP0 = const Self::CTX_TSS_RSP0,
             OFFSET_TSS = const GlobalDescriptorTable::OFFSET_TSS,
-            TSS_OFF_RSP0 = const TaskStateSegment::OFFSET_RSP0,
+            TSS_OFF_RSP0 = const TaskStateSegment64::OFFSET_RSP0,
             CTX_DS = const Self::CTX_DS,
             CTX_ES = const Self::CTX_ES,
             CTX_FS = const Self::CTX_FS,
             CTX_GS = const Self::CTX_GS,
             CTX_USER_CS = const Self::CTX_USER_CS_DESC,
             CTX_USER_DS = const Self::CTX_USER_DS_DESC,
-            USER_CS_IDX = const Selector::LEGACY_CODE.index(),
-            USER_DS_IDX = const Selector::LEGACY_DATA.index(),
+            USER_CS_IDX = const LEGACY_CSEL.index(),
+            USER_DS_IDX = const LEGACY_DSEL.index(),
             options(noreturn)
         );
     }
@@ -652,6 +617,7 @@ impl CpuContextData {
 
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
+#[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ContextIndex {
     USER_CS_DESC = 2,
@@ -665,7 +631,8 @@ enum ContextIndex {
     R15,
     TSS_RSP0,
     Segs,
-    Max = 32,
+    FPU = 32,
+    Max = (Self::FPU as usize) + (512 / size_of::<usize>()),
 }
 
 impl ContextIndex {
@@ -675,206 +642,10 @@ impl ContextIndex {
     }
 }
 
-my_bitflags! {
-    pub struct Rflags: usize {
-        /// Carry flag
-        const CF = 0x0000_0001;
-        // Reserved Always 1
-        const _VF = 0x0000_0002;
-        /// Parity flag
-        const PF = 0x0000_0004;
-        /// Adjust flag
-        const AF = 0x0000_0010;
-        /// Zero flag
-        const ZF = 0x0000_0040;
-        /// Sign flag
-        const SF = 0x0000_0080;
-        /// Trap flag
-        const TF = 0x0000_0100;
-        /// Interrupt enable flag
-        const IF = 0x0000_0200;
-        /// Direction flag
-        const DF = 0x0000_0400;
-        /// Overflow flag
-        const OF = 0x0000_0800;
-        /// I/O privilege level
-        const IOPL3 = 0x0000_3000;
-        /// Nested task flag
-        const NT = 0x0000_4000;
-        /// Mode flag (NEC V30)
-        const MD = 0x0000_8000;
-        /// Resume flag
-        const RF = 0x0001_0000;
-        /// Virtual 8086 mode flag
-        const VM = 0x0002_0000;
-        /// Alignment check
-        const AC = 0x0004_0000;
-        /// Virtual interrupt flag
-        const VIF = 0x0008_0000;
-        /// Virtual interrupt pending
-        const VIP = 0x0010_0000;
-        /// Able to use CPUID instruction
-        const ID = 0x0020_0000;
-    }
-}
-
-impl Rflags {
-    #[inline]
-    pub const fn iopl(&self) -> PrivilegeLevel {
-        PrivilegeLevel::from_usize((self.bits() & Self::IOPL3.bits()) as usize >> 12)
-    }
-
-    #[inline]
-    pub const fn set_iopl(&mut self, iopl: PrivilegeLevel) {
-        *self =
-            Self::from_bits_retain((self.bits() & !Self::IOPL3.bits()) | ((iopl as usize) << 12));
-    }
-}
-
-#[repr(transparent)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub struct DescriptorEntry(u64);
-
-impl DescriptorEntry {
-    pub const PRESENT: u64 = 0x8000_0000_0000;
-    pub const BIG_DATA: u64 = 0x0040_0000_0000_0000;
-
-    #[inline]
-    pub const fn null() -> Self {
-        Self(0)
-    }
-
-    #[inline]
-    pub fn flat_code_segment(dpl: PrivilegeLevel, size: DefaultSize) -> DescriptorEntry {
-        Self::code_segment(Linear32(0), Limit32::MAX, dpl, size)
-    }
-
-    #[inline]
-    pub fn code_segment(
-        base: Linear32,
-        limit: Limit32,
-        dpl: PrivilegeLevel,
-        size: DefaultSize,
-    ) -> DescriptorEntry {
-        DescriptorEntry(
-            0x0000_1A00_0000_0000u64
-                | base.as_segment_base()
-                | limit.as_descriptor_entry()
-                | Self::PRESENT
-                | dpl.as_descriptor_entry()
-                | size.as_descriptor_entry(),
-        )
-    }
-
-    #[inline]
-    pub fn flat_data_segment(dpl: PrivilegeLevel) -> DescriptorEntry {
-        Self::data_segment(Linear32(0), Limit32::MAX, dpl)
-    }
-
-    #[inline]
-    pub fn data_segment(base: Linear32, limit: Limit32, dpl: PrivilegeLevel) -> DescriptorEntry {
-        DescriptorEntry(
-            0x0000_1200_0000_0000u64
-                | base.as_segment_base()
-                | limit.as_descriptor_entry()
-                | Self::PRESENT
-                | Self::BIG_DATA
-                | dpl.as_descriptor_entry(),
-        )
-    }
-
-    #[inline]
-    pub fn tss_descriptor(base: Linear64, limit: Limit16) -> DescriptorPair {
-        let (base_low, base_high) = base.as_segment_base_pair();
-        let low = DescriptorEntry(
-            DescriptorType::Tss.as_descriptor_entry()
-                | base_low
-                | limit.as_descriptor_entry()
-                | Self::PRESENT,
-        );
-        let high = DescriptorEntry(base_high);
-        DescriptorPair::new(low, high)
-    }
-
-    #[inline]
-    pub fn gate_descriptor(
-        offset: Offset64,
-        sel: Selector,
-        dpl: PrivilegeLevel,
-        ty: DescriptorType,
-        ist: Option<InterruptStackTable>,
-    ) -> DescriptorPair {
-        let (offset_low, offset_high) = offset.as_gate_offset_pair();
-        let low = DescriptorEntry(
-            ty.as_descriptor_entry()
-                | offset_low
-                | sel.as_descriptor_entry()
-                | ist.as_descriptor_entry()
-                | dpl.as_descriptor_entry()
-                | Self::PRESENT,
-        );
-        let high = DescriptorEntry(offset_high);
-
-        DescriptorPair::new(low, high)
-    }
-
-    #[inline]
-    pub const fn is_null(&self) -> bool {
-        self.0 == 0
-    }
-
-    #[inline]
-    pub const fn is_present(&self) -> bool {
-        (self.0 & Self::PRESENT) != 0
-    }
-
-    #[inline]
-    pub const fn is_segment(&self) -> bool {
-        (self.0 & 0x1000_0000_0000) != 0
-    }
-
-    #[inline]
-    pub const fn is_code_segment(&self) -> bool {
-        self.is_segment() && (self.0 & 0x0800_0000_0000) != 0
-    }
-
-    #[inline]
-    pub const fn default_operand_size(&self) -> Option<DefaultSize> {
-        DefaultSize::from_descriptor(*self)
-    }
-}
-
-pub trait AsDescriptorEntry {
-    fn as_descriptor_entry(&self) -> u64;
-}
-
-impl<T: AsDescriptorEntry> AsDescriptorEntry for Option<T> {
-    fn as_descriptor_entry(&self) -> u64 {
-        match self {
-            Some(v) => v.as_descriptor_entry(),
-            None => 0,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, PartialEq)]
-pub struct DescriptorPair {
-    pub low: DescriptorEntry,
-    pub high: DescriptorEntry,
-}
-
-impl DescriptorPair {
-    #[inline]
-    pub const fn new(low: DescriptorEntry, high: DescriptorEntry) -> Self {
-        DescriptorPair { low, high }
-    }
-}
-
 #[repr(C, align(16))]
 pub struct GlobalDescriptorTable {
     table: [DescriptorEntry; Self::NUM_ITEMS],
-    tss: TaskStateSegment,
+    tss: TaskStateSegment64,
 }
 
 impl !Send for GlobalDescriptorTable {}
@@ -883,36 +654,25 @@ impl GlobalDescriptorTable {
     pub const NUM_ITEMS: usize = 16;
     pub const OFFSET_TSS: usize = 8 * Self::NUM_ITEMS;
 
+    #[inline]
     unsafe fn new() -> Box<Self> {
         let mut gdt = Box::new(GlobalDescriptorTable {
             table: [DescriptorEntry::null(); Self::NUM_ITEMS],
-            tss: TaskStateSegment::new(),
+            tss: TaskStateSegment64::new(),
         });
 
-        gdt.set_item(
-            Selector::KERNEL_CODE,
-            DescriptorEntry::flat_code_segment(PrivilegeLevel::Kernel, DefaultSize::Use64),
-        )
-        .unwrap();
-        gdt.set_item(
-            Selector::KERNEL_DATA,
-            DescriptorEntry::flat_data_segment(PrivilegeLevel::Kernel),
-        )
-        .unwrap();
+        gdt.set_item(KERNEL_CSEL, DescriptorEntry::flat_code_segment(DPL0, USE64))
+            .unwrap();
+        gdt.set_item(KERNEL_DSEL, DescriptorEntry::flat_data_segment(DPL0))
+            .unwrap();
 
-        gdt.set_item(
-            Selector::USER_CODE,
-            DescriptorEntry::flat_code_segment(PrivilegeLevel::User, DefaultSize::Use64),
-        )
-        .unwrap();
-        gdt.set_item(
-            Selector::USER_DATA,
-            DescriptorEntry::flat_data_segment(PrivilegeLevel::User),
-        )
-        .unwrap();
+        gdt.set_item(USER_CSEL, DescriptorEntry::flat_code_segment(DPL3, USE64))
+            .unwrap();
+        gdt.set_item(USER_DSEL, DescriptorEntry::flat_data_segment(DPL3))
+            .unwrap();
 
         let tss_pair = gdt.tss.as_descriptor_pair();
-        let tss_index = Selector::SYSTEM_TSS.index();
+        let tss_index = SYSTEM_TSS.index();
         gdt.table[tss_index] = tss_pair.low;
         gdt.table[tss_index + 1] = tss_pair.high;
 
@@ -930,11 +690,11 @@ impl GlobalDescriptorTable {
             mov gs, {new_ss:e}
             ", 
             temp = out(reg) _,
-            new_ss = in(reg) Selector::KERNEL_DATA.0,
-            new_cs = in(reg) Selector::KERNEL_CODE.0,
+            new_ss = in(reg) KERNEL_DSEL.as_usize(),
+            new_cs = in(reg) KERNEL_CSEL.as_usize(),
         );
 
-        asm!("ltr {0:x}", in(reg) Selector::SYSTEM_TSS.0);
+        asm!("ltr {0:x}", in(reg) SYSTEM_TSS.0);
 
         gdt
     }
@@ -952,9 +712,19 @@ impl GlobalDescriptorTable {
     }
 
     #[inline]
-    pub unsafe fn set_item(&mut self, selector: Selector, desc: DescriptorEntry) -> Option<()> {
+    pub unsafe fn set_item(
+        &mut self,
+        selector: Selector,
+        desc: DescriptorEntry,
+    ) -> Result<(), SetDescriptorError> {
         let index = selector.index();
-        self.table.get_mut(index).map(|v| *v = desc)
+        if selector.rpl() != desc.dpl().as_rpl() {
+            return Err(SetDescriptorError::PriviledgeMismatch);
+        }
+        self.table
+            .get_mut(index)
+            .map(|v| *v = desc)
+            .ok_or(SetDescriptorError::OutOfIndex)
     }
 
     #[inline]
@@ -981,415 +751,10 @@ impl GlobalDescriptorTable {
     }
 }
 
-/// Type of x86 Segment Limit
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Limit16(pub u16);
-
-impl AsDescriptorEntry for Limit16 {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        self.0 as u64
-    }
-}
-
-/// Type of x86 Segment Limit
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Limit32(pub u32);
-
-impl Limit32 {
-    pub const MAX: Self = Self(u32::MAX);
-}
-
-impl AsDescriptorEntry for Limit32 {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        let limit = self.0;
-        if limit > 0xFFFF {
-            0x0080_0000_0000_0000
-                | ((limit as u64) >> 12) & 0xFFFF
-                | ((limit as u64 & 0xF000_0000) << 20)
-        } else {
-            limit as u64
-        }
-    }
-}
-
-/// Type of 32bit Linear Address
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Linear32(pub u32);
-
-impl Linear32 {
-    #[inline]
-    pub const fn as_segment_base(&self) -> u64 {
-        ((self.0 as u64 & 0x00FF_FFFF) << 16) | ((self.0 as u64 & 0xFF00_0000) << 32)
-    }
-}
-
-/// Type of 64bit Linear Address
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Linear64(pub u64);
-
-impl Linear64 {
-    #[inline]
-    pub const fn as_segment_base_pair(&self) -> (u64, u64) {
-        let low = Linear32(self.0 as u32).as_segment_base();
-        let high = self.0 >> 32;
-        (low, high)
-    }
-}
-
-/// Type of 32bit Offset Address
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Offset32(pub u32);
-
-impl Offset32 {
-    #[inline]
-    pub const fn as_gate_offset(&self) -> u64 {
-        let offset = self.0 as u64;
-        (offset & 0xFFFF) | (offset & 0xFFFF_0000) << 32
-    }
-}
-
-/// Type of 64bit Offset Address
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Offset64(pub u64);
-
-impl Offset64 {
-    #[inline]
-    pub const fn as_gate_offset_pair(&self) -> (u64, u64) {
-        let low = Offset32(self.0 as u32).as_gate_offset();
-        let high = self.0 >> 32;
-        (low, high)
-    }
-}
-
-/// Type of x86 Segment Selector
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Selector(pub u16);
-
-impl Selector {
-    /// The NULL selector that does not contain anything
-    pub const NULL: Selector = Selector(0);
-    pub const KERNEL_CODE: Selector = Selector::new(1, PrivilegeLevel::Kernel);
-    pub const KERNEL_DATA: Selector = Selector::new(2, PrivilegeLevel::Kernel);
-    pub const LEGACY_CODE: Selector = Selector::new(3, PrivilegeLevel::User);
-    pub const LEGACY_DATA: Selector = Selector::new(4, PrivilegeLevel::User);
-    pub const USER_CODE: Selector = Selector::new(5, PrivilegeLevel::User);
-    pub const USER_DATA: Selector = Selector::new(6, PrivilegeLevel::User);
-    pub const SYSTEM_TSS: Selector = Selector::new(8, PrivilegeLevel::Kernel);
-
-    /// Make a new instance of the selector from the specified index and RPL
-    #[inline]
-    pub const fn new(index: usize, rpl: PrivilegeLevel) -> Self {
-        Selector((index << 3) as u16 | rpl as u16)
-    }
-
-    /// Returns the requested privilege level in the selector
-    #[inline]
-    pub const fn rpl(self) -> PrivilegeLevel {
-        PrivilegeLevel::from_usize(self.0 as usize)
-    }
-
-    /// Returns the index field in the selector
-    #[inline]
-    pub const fn index(self) -> usize {
-        (self.0 >> 3) as usize
-    }
-}
-
-impl AsDescriptorEntry for Selector {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        (self.0 as u64) << 16
-    }
-}
-
-/// DPL, CPL, RPL and IOPL
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PrivilegeLevel {
-    /// Ring 0, Kernel mode
-    Kernel = 0,
-    /// Ring 1, Useless in 64bit mode
-    Ring1 = 1,
-    /// Ring 2, Useless in 64bit mode
-    Ring2 = 2,
-    /// Ring 3, User mode
-    User = 3,
-}
-
-impl PrivilegeLevel {
-    #[inline]
-    pub const fn from_usize(value: usize) -> Self {
-        match value & 3 {
-            0 => PrivilegeLevel::Kernel,
-            1 => PrivilegeLevel::Ring1,
-            2 => PrivilegeLevel::Ring2,
-            3 => PrivilegeLevel::User,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl AsDescriptorEntry for PrivilegeLevel {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        (*self as u64) << 45
-    }
-}
-
-impl From<usize> for PrivilegeLevel {
-    #[inline]
-    fn from(value: usize) -> Self {
-        Self::from_usize(value)
-    }
-}
-
-#[non_exhaustive]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum DescriptorType {
-    Null = 0,
-    Tss = 9,
-    TssBusy = 11,
-    InterruptGate = 14,
-    TrapGate = 15,
-}
-
-impl AsDescriptorEntry for DescriptorType {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        let ty = *self as u64;
-        ty << 40
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct InterruptVector(pub u8);
-
-impl InterruptVector {
-    pub const IPI_INVALIDATE_TLB: Self = Self(0xEE);
-    pub const IPI_SCHEDULE: Self = Self(0xFC);
-}
-
-#[repr(u8)]
-#[non_exhaustive]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ExceptionType {
-    /// #DE
-    DivideError = 0,
-    /// #DB
-    Debug = 1,
-    /// NMI
-    NonMaskable = 2,
-    /// #BP
-    Breakpoint = 3,
-    /// #OF
-    Overflow = 4,
-    //Deprecated = 5,
-    /// #UD
-    InvalidOpcode = 6,
-    /// #NM
-    DeviceNotAvailable = 7,
-    /// #DF
-    DoubleFault = 8,
-    //Deprecated = 9,
-    /// #TS
-    InvalidTss = 10,
-    /// #NP
-    SegmentNotPresent = 11,
-    /// #SS
-    StackException = 12,
-    /// #GP
-    GeneralProtection = 13,
-    /// #PF
-    PageFault = 14,
-    //Unavailable = 15,
-    /// #MF
-    FloatingPointException = 16,
-    /// #AC
-    AlignmentCheck = 17,
-    /// #MC
-    MachineCheck = 18,
-    /// #XM
-    SimdException = 19,
-    /// #VE
-    Virtualization = 20,
-    /// #CP
-    ControlProtection = 21,
-    //Reserved
-    /// #SX
-    Security = 30,
-    //Reserved = 31,
-    MAX = 32,
-}
-
-impl ExceptionType {
-    #[inline]
-    pub const fn as_vec(self) -> InterruptVector {
-        InterruptVector(self as u8)
-    }
-
-    #[inline]
-    pub const unsafe fn from_vec(vec: InterruptVector) -> Self {
-        transmute(vec.0)
-    }
-
-    #[inline]
-    pub const fn has_error_code(&self) -> bool {
-        match self {
-            ExceptionType::DoubleFault
-            | ExceptionType::InvalidTss
-            | ExceptionType::SegmentNotPresent
-            | ExceptionType::StackException
-            | ExceptionType::GeneralProtection
-            | ExceptionType::PageFault
-            | ExceptionType::AlignmentCheck
-            | ExceptionType::Security => true,
-            _ => false,
-        }
-    }
-
-    #[inline]
-    pub const fn mnemonic(&self) -> &'static str {
-        match self {
-            ExceptionType::DivideError => "#DE",
-            ExceptionType::Debug => "#DB",
-            ExceptionType::NonMaskable => "NMI",
-            ExceptionType::Breakpoint => "#BP",
-            ExceptionType::Overflow => "#OV",
-            ExceptionType::InvalidOpcode => "#UD",
-            ExceptionType::DeviceNotAvailable => "#NM",
-            ExceptionType::DoubleFault => "#DF",
-            ExceptionType::InvalidTss => "#TS",
-            ExceptionType::SegmentNotPresent => "#NP",
-            ExceptionType::StackException => "#SS",
-            ExceptionType::GeneralProtection => "#GP",
-            ExceptionType::PageFault => "#PF",
-            ExceptionType::FloatingPointException => "#MF",
-            ExceptionType::AlignmentCheck => "#AC",
-            ExceptionType::MachineCheck => "#MC",
-            ExceptionType::SimdException => "#XM",
-            ExceptionType::Virtualization => "#VE",
-            ExceptionType::Security => "#SX",
-            _ => "",
-        }
-    }
-}
-
-impl From<ExceptionType> for InterruptVector {
-    #[inline]
-    fn from(ex: ExceptionType) -> Self {
-        InterruptVector(ex as u8)
-    }
-}
-
-#[repr(C, packed)]
-#[derive(Default)]
-pub struct TaskStateSegment {
-    _reserved_1: u32,
-    stack_pointer: [u64; 3],
-    _reserved_2: [u32; 2],
-    ist: [u64; 7],
-    _reserved_3: [u32; 2],
-    iomap_base: u16,
-}
-
-impl !Send for TaskStateSegment {}
-
-impl TaskStateSegment {
-    pub const OFFSET_RSP0: usize = 0x04;
-
-    pub const LIMIT: u16 = 0x67;
-
-    #[inline]
-    pub const fn new() -> Self {
-        Self {
-            _reserved_1: 0,
-            stack_pointer: [0; 3],
-            _reserved_2: [0, 0],
-            ist: [0; 7],
-            _reserved_3: [0, 0],
-            iomap_base: 0,
-        }
-    }
-
-    #[inline]
-    pub fn as_descriptor_pair(&self) -> DescriptorPair {
-        DescriptorEntry::tss_descriptor(
-            Linear64(self as *const _ as usize as u64),
-            Limit16(Self::LIMIT),
-        )
-    }
-}
-
-#[repr(u64)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum DefaultSize {
-    Use16 = 0x0000_0000_0000_0000,
-    Use32 = 0x0040_0000_0000_0000,
-    Use64 = 0x0020_0000_0000_0000,
-}
-
-impl AsDescriptorEntry for DefaultSize {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        *self as u64
-    }
-}
-
-impl DefaultSize {
-    #[inline]
-    pub const fn as_descriptor_entry(&self) -> u64 {
-        *self as u64
-    }
-
-    #[inline]
-    pub const fn from_descriptor(value: DescriptorEntry) -> Option<Self> {
-        if value.is_code_segment() {
-            let is_32 = (value.0 & Self::Use32.as_descriptor_entry()) != 0;
-            let is_64 = (value.0 & Self::Use64.as_descriptor_entry()) != 0;
-            match (is_32, is_64) {
-                (false, false) => Some(Self::Use16),
-                (false, true) => Some(Self::Use64),
-                (true, false) => Some(Self::Use32),
-                (true, true) => None,
-            }
-        } else {
-            None
-        }
-    }
-}
-
-impl TryFrom<DescriptorEntry> for DefaultSize {
-    type Error = ();
-    fn try_from(value: DescriptorEntry) -> Result<Self, Self::Error> {
-        Self::from_descriptor(value).ok_or(())
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum InterruptStackTable {
-    IST1 = 1,
-    IST2,
-    IST3,
-    IST4,
-    IST5,
-    IST6,
-    IST7,
-}
-
-impl AsDescriptorEntry for InterruptStackTable {
-    #[inline]
-    fn as_descriptor_entry(&self) -> u64 {
-        (*self as u64) << 32
-    }
+pub enum SetDescriptorError {
+    OutOfIndex,
+    PriviledgeMismatch,
 }
 
 static mut IDT: UnsafeCell<InterruptDescriptorTable> =
@@ -1408,7 +773,7 @@ macro_rules! register_exception {
             Self::register(
                 ExceptionType::$mnemonic.as_vec(),
                 [<exc_ $mnemonic>] as usize,
-                PrivilegeLevel::Kernel,
+                DPL0,
             );
         }
     };
@@ -1423,6 +788,7 @@ impl InterruptDescriptorTable {
         }
     }
 
+    #[inline]
     unsafe fn init() {
         register_exception!(DivideError);
         register_exception!(Breakpoint);
@@ -1437,10 +803,11 @@ impl InterruptDescriptorTable {
         {
             // Haribote OS Supports
             let vec = InterruptVector(0x40);
-            Self::register(vec, cpu_int40_handler as usize, PrivilegeLevel::User);
+            Self::register(vec, cpu_int40_handler as usize, DPL3);
         }
     }
 
+    #[inline]
     unsafe fn load() {
         let idt = &*IDT.get();
         asm!("
@@ -1452,17 +819,17 @@ impl InterruptDescriptorTable {
     }
 
     #[track_caller]
-    pub unsafe fn register(vec: InterruptVector, offset: usize, dpl: PrivilegeLevel) {
+    pub unsafe fn register(vec: InterruptVector, offset: usize, dpl: DPL) {
         let table_offset = vec.0 as usize * 2;
         let idt = IDT.get_mut();
         if !idt.table[table_offset].is_null() {
             panic!("IDT entry #{} is already in use", vec.0);
         }
-        let pair = DescriptorEntry::gate_descriptor(
+        let pair = DescriptorEntry::gate64(
             Offset64(offset as u64),
-            Selector::KERNEL_CODE,
+            KERNEL_CSEL,
             dpl,
-            if dpl == PrivilegeLevel::Kernel {
+            if dpl == DPL0 {
                 DescriptorType::InterruptGate
             } else {
                 DescriptorType::TrapGate
@@ -1473,490 +840,6 @@ impl InterruptDescriptorTable {
         idt.table[table_offset] = pair.low;
         fence(Ordering::SeqCst);
     }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum Feature {
-    F01D(F01D),
-    F01C(F01C),
-    F07B(F070B),
-    F07C(F070C),
-    F07D(F070D),
-    F81D(F81D),
-    F81C(F81C),
-}
-
-impl Feature {
-    pub unsafe fn has_feature(&self) -> bool {
-        match *self {
-            Self::F01D(bit) => (__cpuid_count(0x0000_0001, 0).edx & (1 << bit as usize)) != 0,
-            Self::F01C(bit) => (__cpuid_count(0x0000_0001, 0).ecx & (1 << bit as usize)) != 0,
-            Self::F07B(bit) => (__cpuid_count(0x0000_0007, 0).ebx & (1 << bit as usize)) != 0,
-            Self::F07C(bit) => (__cpuid_count(0x0000_0007, 0).ecx & (1 << bit as usize)) != 0,
-            Self::F07D(bit) => (__cpuid_count(0x0000_0007, 0).edx & (1 << bit as usize)) != 0,
-            Self::F81D(bit) => (__cpuid_count(0x8000_0001, 0).edx & (1 << bit as usize)) != 0,
-            Self::F81C(bit) => (__cpuid_count(0x8000_0001, 0).ecx & (1 << bit as usize)) != 0,
-        }
-    }
-}
-
-/// CPUID Feature Function 0000_0001, EDX
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F01D {
-    FPU = 0,
-    VME = 1,
-    DE = 2,
-    PSE = 3,
-    TSC = 4,
-    MSR = 5,
-    PAE = 6,
-    MCE = 7,
-    CX8 = 8,
-    APIC = 9,
-    SEP = 11,
-    MTRR = 12,
-    MGE = 13,
-    MCA = 14,
-    CMOV = 15,
-    PAT = 16,
-    PSE36 = 17,
-    PSN = 18,
-    CLFSH = 19,
-    DS = 21,
-    ACPI = 22,
-    MMX = 23,
-    FXSR = 24,
-    SSE = 25,
-    SSE2 = 26,
-    SS = 27,
-    HTT = 28,
-    TM = 29,
-    IA64 = 30,
-    PBE = 31,
-}
-
-/// CPUID Feature Function 0000_0001, ECX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F01C {
-    SSE3 = 0,
-    PCLMULQDQ = 1,
-    DTES64 = 2,
-    MONITOR = 3,
-    DS_CPL = 4,
-    VMX = 5,
-    SMX = 6,
-    EST = 7,
-    TM2 = 8,
-    SSSE3 = 9,
-    CNXT_ID = 10,
-    SDBG = 11,
-    FMA = 12,
-    CX16 = 13,
-    XTPR = 14,
-    PDCM = 15,
-    PCID = 17,
-    DCA = 18,
-    SSE4_1 = 19,
-    SSE4_2 = 20,
-    X2APIC = 21,
-    MOVBE = 22,
-    POPCNT = 23,
-    TSC_DEADLINE = 24,
-    AES = 25,
-    XSAVE = 26,
-    OSXSAVE = 27,
-    AVX = 28,
-    F16C = 29,
-    RDRND = 30,
-    HYPERVISOR = 31,
-}
-
-/// CPUID Feature Function 0000_0007, 0, EBX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F070B {
-    FSGSBASE = 0,
-    IA32_TSC_ADJUST = 1,
-    SGX = 2,
-    BMI1 = 3,
-    HLE = 4,
-    AVX2 = 5,
-    FDP_EXCPTN_ONLY = 6,
-    SMEP = 7,
-    BMI2 = 8,
-    ERMS = 9,
-    INVPCID = 10,
-    RTM = 11,
-    PQM = 12,
-    // FPU CS and FPU DS deprecated = 13,
-    MPX = 14,
-    PQE = 15,
-    AVX512_F = 16,
-    AVX512_DQ = 17,
-    RDSEED = 18,
-    ADX = 19,
-    SMAP = 20,
-    AVX512_IFMA = 21,
-    PCOMMIT = 22,
-    CLFLUSHIPT = 23,
-    CLWB = 24,
-    INTEL_PT = 25,
-    AVX512_PF = 26,
-    AVX512_ER = 27,
-    AVX512_CD = 28,
-    SHA = 29,
-    AVX512_BW = 30,
-    AVX512_VL = 31,
-}
-
-/// CPUID Feature Function 0000_0007, 0, ECX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F070C {
-    PREFETCHWT1 = 0,
-    AVX512_VBMI = 1,
-    UMIP = 2,
-    PKU = 3,
-    OSPKE = 4,
-    WAITPKG = 5,
-    AVX512_VBMI2 = 6,
-    CET_SS = 7,
-    GFNI = 8,
-    VAES = 9,
-    VPCLMULQDQ = 10,
-    AVX512_VNNI = 11,
-    AVX512_BITALG = 12,
-    AVX512_VPOPCNTDQ = 14,
-    LA57 = 16,
-    RDPID = 22,
-    CLDEMOTE = 25,
-    MOVDIRI = 27,
-    MOVDIR64B = 28,
-    ENQCMD = 29,
-    SGX_LC = 30,
-    PKS = 31,
-}
-
-/// CPUID Feature Function 0000_0007, 0, EDX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F070D {
-    AVX512_4VNNIW = 2,
-    AVX512_4FMAPS = 3,
-    FSRM = 4,
-    AVX512_VP2INTERSECT = 8,
-    SRBDS_CTRL = 9,
-    MD_CLEAR = 10,
-    TSX_FORCE_ABORT = 13,
-    SERIALIZE = 14,
-    HYBRID = 15,
-    TSXLDTRK = 16,
-    PCONFIG = 18,
-    LBR = 19,
-    CET_IBT = 20,
-    AMX_BF16 = 22,
-    AMX_TILE = 24,
-    AMX_INT8 = 25,
-    IBRS_IBPB = 26,
-    STIBP = 27,
-    L1D_FLUSH = 28,
-    IA32_ARCH_CAPABILITIES = 29,
-    IA32_CORE_CAPABILITIES = 30,
-    SSBD = 31,
-}
-
-/// CPUID Feature Function 8000_0001, EDX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F81D {
-    SYSCALL = 11,
-    NX = 20,
-    PDPE1GB = 26,
-    RDTSCP = 27,
-    LM = 29,
-}
-
-/// CPUID Feature Function 8000_0001, ECX
-#[allow(non_camel_case_types)]
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum F81C {
-    LAHF_LM = 0,
-    CMP_LEGACY = 1,
-    SVM = 2,
-    EXTAPIC = 3,
-    CR8_LEGACY = 4,
-    ABM = 5,
-    SSE4A = 6,
-    MISALIGNSSE = 7,
-    _3DNOWPREFETCH = 8,
-    OSVW = 9,
-    IBS = 10,
-    XOP = 11,
-    SKINIT = 12,
-    WDT = 13,
-    LWP = 15,
-    FMA4 = 16,
-    TCE = 17,
-    NODEID_MSR = 19,
-    TBM = 21,
-    TOPOEXT = 22,
-    PERFCTR_CORE = 23,
-    PERFCTR_NB = 24,
-    DBX = 26,
-    PERFTSC = 27,
-    PCX_L2I = 28,
-}
-
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy)]
-pub enum NativeModelCoreType {
-    Performance,
-    Efficient,
-}
-
-impl NativeModelCoreType {
-    const CORE_TYPE_ATOM: u8 = 0x20;
-    const CORE_TYPE_CORE: u8 = 0x40;
-
-    #[inline]
-    pub const fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            Self::CORE_TYPE_ATOM => Some(Self::Efficient),
-            Self::CORE_TYPE_CORE => Some(Self::Performance),
-            _ => None,
-        }
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MSR(u32);
-
-impl MSR {
-    pub const IA32_TSC: Self = Self(0x0000_0010);
-    pub const IA32_PLATFORM_ID: Self = Self(0x0000_0017);
-    pub const IA32_APIC_BASE: Self = Self(0x0000_001B);
-    pub const IA32_FEATURE_CONTROL: Self = Self(0x0000_003A);
-    pub const IA32_TSC_ADJUST: Self = Self(0x0000_0003B);
-    pub const IA32_MTRRCAP: Self = Self(0x0000_00FE);
-    pub const IA32_MISC_ENABLE: Self = Self(0x0000_01A0);
-    pub const IA32_TSC_DEADLINE: Self = Self(0x0000_06E0);
-    pub const IA32_SYSENTER_CS: Self = Self(0x0000_0174);
-    pub const IA32_SYSENTER_ESP: Self = Self(0x0000_0175);
-    pub const IA32_SYSENTER_EIP: Self = Self(0x0000_0176);
-    pub const IA32_PAT: Self = Self(0x0000_0277);
-    pub const IA32_MTRR_DEF_TYPE: Self = Self(0x0000_02FF);
-    pub const IA32_HW_FEEDBACK_PTR: Self = Self(0x0000_17D0);
-    pub const IA32_HW_FEEDBACK_CONFIG: Self = Self(0x0000_17D1);
-    pub const IA32_THREAD_FEEDBACK_CHAR: Self = Self(0x0000_17D2);
-    pub const IA32_HW_FEEDBACK_THREAD_CONFIG: Self = Self(0x0000_17D4);
-
-    pub const IA32_EFER: Self = Self(0xC000_0080);
-    pub const IA32_STAR: Self = Self(0xC000_0081);
-    pub const IA32_LSTAR: Self = Self(0xC000_0082);
-    pub const IA32_CSTAR: Self = Self(0xC000_0083);
-    pub const IA32_FMASK: Self = Self(0xC000_0084);
-    pub const IA32_FS_BASE: Self = Self(0xC000_0100);
-    pub const IA32_GS_BASE: Self = Self(0xC000_0101);
-    pub const IA32_KERNEL_GS_BASE: Self = Self(0xC000_0102);
-    pub const IA32_TSC_AUX: Self = Self(0xC000_0103);
-    pub const CPU_WATCHDOG_TIMER: Self = Self(0xC001_0074);
-
-    #[inline]
-    #[allow(non_snake_case)]
-    pub fn IA32_MTRRphysBase(n: MtrrIndex) -> Self {
-        Self(0x0000_0200 + n.0 as u32 * 2)
-    }
-
-    #[inline]
-    #[allow(non_snake_case)]
-    pub fn IA32_MTRRphysMask(n: MtrrIndex) -> Self {
-        Self(0x0000_0201 + n.0 as u32 * 2)
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-union MsrResult {
-    qword: u64,
-    pair: EaxAndEdx,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct EaxAndEdx {
-    eax: u32,
-    edx: u32,
-}
-
-impl MSR {
-    #[inline]
-    pub unsafe fn write(self, value: u64) {
-        let value = MsrResult { qword: value };
-        asm!(
-            "wrmsr",
-            in("eax") value.pair.eax,
-            in("edx") value.pair.edx,
-            in("ecx") self.0,
-        );
-    }
-
-    #[inline]
-    pub unsafe fn read(self) -> u64 {
-        let eax: u32;
-        let edx: u32;
-        asm!(
-            "rdmsr",
-            lateout("eax") eax,
-            lateout("edx") edx,
-            in("ecx") self.0,
-        );
-        MsrResult {
-            pair: EaxAndEdx { eax, edx },
-        }
-        .qword
-    }
-
-    #[inline]
-    pub unsafe fn set_pat(values: &[PAT; 8]) {
-        let data = values
-            .into_iter()
-            .fold(0, |acc, v| (acc << 8) + (*v as u64))
-            .swap_bytes();
-        MSR::IA32_PAT.write(data);
-    }
-}
-
-#[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct MtrrIndex(pub u8);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Mtrr {
-    /// UC Uncacheable
-    UC = 0,
-    /// WC WriteCombining
-    WC = 1,
-    /// WT WriteThrough
-    WT = 4,
-    /// WP WriteProtect
-    WP = 5,
-    /// WB WriteBack
-    WB = 6,
-}
-
-impl Mtrr {
-    #[inline]
-    pub fn count() -> usize {
-        unsafe { MSR::IA32_MTRRCAP.read() as usize & 0xFF }
-    }
-
-    #[inline]
-    pub fn indexes() -> impl Iterator<Item = MtrrIndex> {
-        (0..Self::count() as u8).into_iter().map(|v| MtrrIndex(v))
-    }
-
-    #[inline]
-    pub unsafe fn get(index: MtrrIndex) -> MtrrItem {
-        let base = MSR::IA32_MTRRphysBase(index).read();
-        let mask = MSR::IA32_MTRRphysMask(index).read();
-        MtrrItem::from_raw(base, mask)
-    }
-
-    #[inline]
-    pub unsafe fn set(index: MtrrIndex, item: MtrrItem) {
-        let (base, mask) = item.into_pair();
-        MSR::IA32_MTRRphysBase(index).write(base);
-        MSR::IA32_MTRRphysMask(index).write(mask);
-    }
-
-    #[inline]
-    pub unsafe fn items() -> impl Iterator<Item = MtrrItem> {
-        Self::indexes().map(|n| Self::get(n))
-    }
-
-    #[inline]
-    pub unsafe fn set_items(items: &[MtrrItem]) {
-        let mut items = items
-            .iter()
-            .filter(|v| v.is_enabled)
-            .map(|v| *v)
-            .collect::<Vec<_>>();
-        items.sort_by_key(|v| v.base);
-        items.resize(Self::count(), MtrrItem::empty());
-        for (index, item) in Self::indexes().zip(items.into_iter()) {
-            Self::set(index, item);
-        }
-    }
-
-    #[inline]
-    pub const fn from_raw(value: u8) -> Self {
-        unsafe { transmute(value) }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MtrrItem {
-    pub base: PhysicalAddress,
-    pub mask: u64,
-    pub mem_type: Mtrr,
-    pub is_enabled: bool,
-}
-
-impl MtrrItem {
-    const ADDR_MASK: u64 = !0xFFF;
-
-    #[inline]
-    pub const fn empty() -> Self {
-        Self {
-            base: PhysicalAddress::new(0),
-            mask: 0,
-            mem_type: Mtrr::UC,
-            is_enabled: false,
-        }
-    }
-
-    #[inline]
-    pub fn from_raw(base: u64, mask: u64) -> Self {
-        let mem_type = Mtrr::from_raw(base as u8);
-        let is_enabled = (mask & 0x800) != 0;
-        Self {
-            base: PhysicalAddress::new(base & Self::ADDR_MASK),
-            mask: mask & Self::ADDR_MASK,
-            mem_type,
-            is_enabled,
-        }
-    }
-
-    #[inline]
-    pub fn into_pair(self) -> (u64, u64) {
-        let base = (self.base.as_u64() & Self::ADDR_MASK) | self.mem_type as u64;
-        let mask = (self.mask & Self::ADDR_MASK & Cpu::physical_address_mask())
-            | if self.is_enabled { 0x800 } else { 0 };
-        (base, mask)
-    }
-
-    #[inline]
-    pub fn matches(&self, other: PhysicalAddress) -> bool {
-        (self.base & self.mask) == (other & self.mask)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PAT {
-    /// UC Uncacheable
-    UC = 0,
-    /// WC WriteCombining
-    WC = 1,
-    /// WT WriteThrough
-    WT = 4,
-    /// WP WriteProtect
-    WP = 5,
-    /// WB WriteBack
-    WB = 6,
-    /// UC- Uncached
-    UC_ = 7,
 }
 
 #[allow(dead_code)]
@@ -2054,8 +937,8 @@ unsafe extern "C" fn handle_default_exception(ctx: &X64ExceptionContext) {
         let cs_desc = GlobalDescriptorTable::current().item(ctx.cs()).unwrap();
         let ex = ExceptionType::from_vec(ctx.vector());
 
-        match cs_desc.default_operand_size().unwrap() {
-            DefaultSize::Use16 | DefaultSize::Use32 => {
+        match cs_desc.default_operand_size() {
+            Some(USE16) | Some(USE32) => {
                 let mask32 = u32::MAX as u64;
                 match ex {
                     ExceptionType::PageFault => {
@@ -2074,7 +957,8 @@ unsafe extern "C" fn handle_default_exception(ctx: &X64ExceptionContext) {
                     _ => {
                         writeln!(
                             stdout,
-                            "\n#### EXCEPTION {} err {:04x} EIP {:02x}:{:08x} ESP {:02x}:{:08x}",
+                            "\n#### EXCEPTION {:?} ({}) err {:04x} EIP {:02x}:{:08x} ESP {:02x}:{:08x}",
+                            ex,
                             ex.mnemonic(),
                             ctx.error_code(),
                             ctx.cs().0,
@@ -2105,21 +989,41 @@ unsafe extern "C" fn handle_default_exception(ctx: &X64ExceptionContext) {
                     ctx.gs().0,
                 );
             }
-            DefaultSize::Use64 => {
+            _ => {
+                // use64
                 let va_mask = 0xFFFF_FFFF_FFFF;
                 match ex {
                     ExceptionType::PageFault => {
-                        writeln!(
-                        stdout,
-                        "\n#### PAGE FAULT {:04x} {:012x} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
-                        ctx.error_code(),
-                        ctx.cr2 & va_mask,
-                        ctx.cs().0,
-                        ctx.rip & va_mask,
-                        ctx.ss().0,
-                        ctx.rsp & va_mask,
-                    )
-                        .unwrap();
+                        match ctx.cr2 >> 47 {
+                            0x0_0000 | 0x1_FFFF => {
+                                // Canonical Address
+                                writeln!(
+                                    stdout,
+                                    "\n#### PAGE FAULT {:04x} {:012x} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                    ctx.error_code(),
+                                    ctx.cr2 & 0xFFFF_FFFF_FFFF,
+                                    ctx.cs().0,
+                                    ctx.rip & va_mask,
+                                    ctx.ss().0,
+                                    ctx.rsp & va_mask,
+                                )
+                                    .unwrap();
+                                    }
+                            _ => {
+                                // Non Canonical Address (BUG?)
+                                writeln!(
+                                    stdout,
+                                    "\n#### PAGE FAULT {:04x} {:016x} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                    ctx.error_code(),
+                                    ctx.cr2,
+                                    ctx.cs().0,
+                                    ctx.rip & va_mask,
+                                    ctx.ss().0,
+                                    ctx.rsp & va_mask,
+                                )
+                                    .unwrap();
+                                    }
+                        }
                     }
                     ExceptionType::SimdException => {
                         writeln!(
@@ -2137,7 +1041,8 @@ unsafe extern "C" fn handle_default_exception(ctx: &X64ExceptionContext) {
                         if ex.has_error_code() {
                             writeln!(
                                 stdout,
-                                "\n#### EXCEPTION {} err {:04x} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                "\n#### EXCEPTION {:?} ({}) err {:04x} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                ex,
                                 ex.mnemonic(),
                                 ctx.error_code(),
                                 ctx.cs().0,
@@ -2149,7 +1054,8 @@ unsafe extern "C" fn handle_default_exception(ctx: &X64ExceptionContext) {
                         } else {
                             writeln!(
                                 stdout,
-                                "\n#### EXCEPTION {} rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                "\n#### EXCEPTION {:?} ({}) rip {:02x}:{:012x} rsp {:02x}:{:012x}",
+                                ex,
                                 ex.mnemonic(),
                                 ctx.cs().0,
                                 ctx.rip & va_mask,
@@ -2231,8 +1137,11 @@ macro_rules! exception_handler {
                 push rax
                 mov ecx, es
                 push rcx
-                push fs
-                push gs
+
+                // To avoid push fs/gs bugs
+                .byte 0x0F, 0xA0
+                .byte 0x0F, 0xA8
+
                 mov rax, cr2
                 push rax
                 xor eax, eax
@@ -2300,8 +1209,11 @@ macro_rules! exception_handler_noerr {
                 push rax
                 mov ecx, es
                 push rcx
-                push fs
-                push gs
+
+                // To avoid push fs/gs bugs
+                .byte 0x0F, 0xA0
+                .byte 0x0F, 0xA8
+
                 mov rax, cr2
                 push rax
                 xor eax, eax

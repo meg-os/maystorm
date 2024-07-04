@@ -1,14 +1,15 @@
-use super::cpu::{MSR, PAT};
+//! 4-level paging (48bit)
+
 use crate::{mem::*, *};
-use core::{
-    alloc::Layout,
-    arch::asm,
-    ffi::c_void,
-    mem::transmute,
-    num::NonZeroUsize,
-    ops::{AddAssign, BitOrAssign, SubAssign},
-    sync::atomic::*,
-};
+use bootprot::BootInfo;
+use core::alloc::Layout;
+use core::arch::asm;
+use core::ffi::c_void;
+use core::mem::transmute;
+use core::num::NonZeroUsize;
+use core::ops::AddAssign;
+use core::sync::atomic::*;
+use x86::msr::{MSR, PAT};
 
 type PageTableRepr = u64;
 
@@ -21,21 +22,21 @@ impl PageManager {
     const PAGE_SIZE_M1: PageTableRepr = 0xFFF;
 
     const PAGE_USER_MIN: usize = 0x000;
-    const PAGE_USER_MAX: usize = 0x100;
-    const PAGE_DIRECT_MAP: usize = 0x180;
+    const PAGE_USER_MAX: usize = 0x0FF;
+    const PAGE_DIRECT_MAP: usize = 0x140;
     const PAGE_HEAP_MIN: usize = 0x1FC;
     const PAGE_HEAP_MAX: usize = 0x1FD;
     const PAGE_RECURSIVE: usize = 0x1FE;
-    // const PAGE_KERNEL_HEAP: usize = 0x1FC;
 
     const DIRECT_BASE: usize = PageLevel::MAX.addr(Self::PAGE_DIRECT_MAP);
+    const SIZE_DIRECT_MAP: u64 = PageLevel::Level3.size_of_page();
 
     #[inline]
     pub unsafe fn init(_info: &BootInfo) {
         let base = Self::read_pdbr() & !Self::PAGE_SIZE_M1;
         let p = base as usize as *mut PageTableEntry;
 
-        MSR::set_pat(&PageAttribute::PREFERRED_PAT_SETTINGS);
+        MSR::set_pat(PageAttribute::PREFERRED_PAT_SETTINGS);
 
         // FFFF_FF00_0000_0000 - FFFF_FF7F_FFFF_FFFF RECURSIVE PAGE TABLE AREA
         p.add(Self::PAGE_RECURSIVE)
@@ -47,7 +48,7 @@ impl PageManager {
         // FFFF_????_????_???? (TEMP) DIRECT MAPPING AREA
         {
             let mut pte = p.read_volatile();
-            pte += PageAttribute::NO_EXECUTE | PageAttribute::WRITE | PageAttribute::PRESENT;
+            pte.insert(PageAttribute::NO_EXECUTE | PageAttribute::WRITE | PageAttribute::PRESENT);
             p.add(Self::PAGE_DIRECT_MAP).write_volatile(pte);
         }
 
@@ -56,10 +57,10 @@ impl PageManager {
 
     #[inline]
     pub unsafe fn init_late() {
-        // let base = Self::read_pdbr().as_usize() & !(Self::PAGE_SIZE_4K - 1);
+        // let base = (Self::read_pdbr() as usize) & !(Self::PAGE_SIZE_4K - 1);
         // let p = base as *const u64 as *mut PageTableEntry;
-        // p.write_volatile(PageTableEntry::empty());
-        // Self::invalidate_all_pages();
+        // p.write_volatile(PageTableEntry::null());
+        // Self::invalidate_all_tlb();
     }
 
     #[inline]
@@ -67,7 +68,9 @@ impl PageManager {
     pub unsafe fn mmap(request: MemoryMapRequest) -> usize {
         match request {
             MemoryMapRequest::Mmio(base, len) => {
-                let Some(len) = NonZeroUsize::new(len) else { return 0 };
+                let Some(len) = NonZeroUsize::new(len) else {
+                    return 0;
+                };
                 let va = Self::direct_map(base);
                 match Self::_map(
                     va,
@@ -85,7 +88,9 @@ impl PageManager {
                 }
             }
             MemoryMapRequest::Framebuffer(base, len) => {
-                let Some(len) = NonZeroUsize::new(len) else { return 0 };
+                let Some(len) = NonZeroUsize::new(len) else {
+                    return 0;
+                };
                 let va = Self::direct_map(base);
                 match Self::_map(
                     va,
@@ -112,8 +117,12 @@ impl PageManager {
                 {
                     return 0;
                 }
-                let Some(len) = NonZeroUsize::new(len) else { return 0 };
-                let Some(pa) = MemoryManager::alloc_pages(len.get()).map(|v| v.get()) else { return 0 };
+                let Some(len) = NonZeroUsize::new(len) else {
+                    return 0;
+                };
+                let Some(pa) = MemoryManager::alloc_pages(len.get()).map(|v| v.get()) else {
+                    return 0;
+                };
 
                 match Self::_map(va, len, PageTableEntry::new(pa, PageAttribute::from(attr))) {
                     Ok(_) => va,
@@ -122,14 +131,18 @@ impl PageManager {
             }
             MemoryMapRequest::User(va, len, attr) => {
                 if PageLevel::MAX.component(va) < Self::PAGE_USER_MIN
-                    || PageLevel::MAX.component(va) >= Self::PAGE_USER_MAX
-                    || PageLevel::MAX.component(len) >= (Self::PAGE_USER_MAX - Self::PAGE_USER_MIN)
-                    || PageLevel::MAX.component(va + len) >= Self::PAGE_USER_MAX
+                    || PageLevel::MAX.component(va) > Self::PAGE_USER_MAX
+                    || PageLevel::MAX.component(len) > (Self::PAGE_USER_MAX - Self::PAGE_USER_MIN)
+                    || PageLevel::MAX.component(va + len) > Self::PAGE_USER_MAX
                 {
                     return 0;
                 }
-                let Some(len) = NonZeroUsize::new(len) else { return 0 };
-                let Some(pa) = MemoryManager::alloc_pages(len.get()).map(|v| v.get()) else { return 0 };
+                let Some(len) = NonZeroUsize::new(len) else {
+                    return 0;
+                };
+                let Some(pa) = MemoryManager::alloc_pages(len.get()).map(|v| v.get()) else {
+                    return 0;
+                };
 
                 let mut template = PageAttribute::from(attr);
                 template.insert(PageAttribute::USER);
@@ -140,7 +153,9 @@ impl PageManager {
                 va
             }
             MemoryMapRequest::MProtect(va, len, attr) => {
-                let Some(len) = NonZeroUsize::new(len) else { return 0 };
+                let Some(len) = NonZeroUsize::new(len) else {
+                    return 0;
+                };
 
                 Self::_mprotect(va, len, attr)
                     .map(|_| va)
@@ -224,7 +239,7 @@ impl PageManager {
     #[inline]
     unsafe fn _map_table_if_needed(va: usize, level: PageLevel, template: PageTableEntry) {
         let pte = level.pte_of(va);
-        if pte.read_volatile().is_present() {
+        if pte.read_volatile().page_exists() {
             (&mut *pte)
                 .accept(template.access_rights())
                 .map(|_| Self::invalidate_tlb(va));
@@ -251,7 +266,7 @@ impl PageManager {
         for va in (va..va + len).step_by(Self::PAGE_SIZE_4K) {
             for level in [PageLevel::Level4, PageLevel::Level3, PageLevel::Level2] {
                 let entry = &*level.pte_of(va);
-                if !entry.is_present() {
+                if !entry.page_exists() {
                     return Err(va);
                 }
             }
@@ -310,8 +325,9 @@ impl PageManager {
     }
 
     #[inline]
-    pub(super) const fn direct_unmap(va: usize) -> PhysicalAddress {
-        PhysicalAddress::from_usize(va - Self::DIRECT_BASE)
+    pub(super) fn direct_unmap(va: usize) -> Option<PhysicalAddress> {
+        (va >= Self::DIRECT_BASE && ((va - Self::DIRECT_BASE) as u64) < Self::SIZE_DIRECT_MAP)
+            .then(|| PhysicalAddress::from_usize(va - Self::DIRECT_BASE))
     }
 }
 
@@ -410,16 +426,16 @@ pub(super) struct PageTableEntry(PageTableRepr);
 
 #[allow(dead_code)]
 impl PageTableEntry {
-    pub const ADDRESS_BIT: PageTableRepr = 0x0000_FFFF_FFFF_F000;
+    pub const ADDRESS_BITS: PageTableRepr = 0x0000_FFFF_FFFF_F000;
 
     #[inline]
-    pub const fn empty() -> Self {
+    pub const fn null() -> Self {
         Self(0)
     }
 
     #[inline]
     pub const fn new(base: PhysicalAddress, attr: PageAttribute) -> Self {
-        Self((base.as_u64() & Self::ADDRESS_BIT) | attr.bits())
+        Self((base.as_u64() & Self::ADDRESS_BITS) | attr.bits())
     }
 
     #[inline]
@@ -428,12 +444,12 @@ impl PageTableEntry {
     }
 
     #[inline]
-    pub const fn is_empty(&self) -> bool {
+    pub const fn is_null(&self) -> bool {
         self.0 == 0
     }
 
     #[inline]
-    pub const fn is_present(&self) -> bool {
+    pub const fn page_exists(&self) -> bool {
         self.contains(PageAttribute::PRESENT)
     }
 
@@ -462,7 +478,7 @@ impl PageTableEntry {
 
     #[inline]
     pub const fn frame_address(&self) -> PhysicalAddress {
-        PhysicalAddress::new(self.0 & Self::ADDRESS_BIT)
+        PhysicalAddress::new(self.0 & Self::ADDRESS_BITS)
     }
 
     #[inline]
@@ -472,12 +488,12 @@ impl PageTableEntry {
 
     #[inline]
     pub const fn set_frame_address(&mut self, pa: PhysicalAddress) {
-        self.0 = (pa.as_u64() & Self::ADDRESS_BIT) | (self.0 & !Self::ADDRESS_BIT);
+        self.0 = (pa.as_u64() & Self::ADDRESS_BITS) | (self.0 & !Self::ADDRESS_BITS);
     }
 
     #[inline]
     pub const fn set_attributes(&mut self, flags: PageAttribute) {
-        self.0 = (self.0 & Self::ADDRESS_BIT) | (flags.bits() & !Self::ADDRESS_BIT);
+        self.0 = (self.0 & Self::ADDRESS_BITS) | (flags.bits() & !Self::ADDRESS_BITS);
     }
 
     #[inline]
@@ -504,27 +520,6 @@ impl PageTableEntry {
             result = true;
         }
         result.then(|| ())
-    }
-}
-
-impl AddAssign<PageAttribute> for PageTableEntry {
-    #[inline]
-    fn add_assign(&mut self, rhs: PageAttribute) {
-        self.insert(rhs);
-    }
-}
-
-impl SubAssign<PageAttribute> for PageTableEntry {
-    #[inline]
-    fn sub_assign(&mut self, rhs: PageAttribute) {
-        self.remove(rhs);
-    }
-}
-
-impl BitOrAssign<PageAttribute> for PageTableEntry {
-    #[inline]
-    fn bitor_assign(&mut self, rhs: PageAttribute) {
-        self.insert(rhs);
     }
 }
 
@@ -583,6 +578,11 @@ impl PageLevel {
                     Self::Level3 => 2,
                     Self::Level4 => 3,
                 }
+    }
+
+    #[inline]
+    pub const fn size_of_page(&self) -> u64 {
+        (1u64 << self.shift()).wrapping_sub(1)
     }
 
     /// Returns the component of the current level specified by linear address.

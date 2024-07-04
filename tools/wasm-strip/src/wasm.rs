@@ -1,6 +1,5 @@
 //! WemAssembly mini library (expr)
 
-use byteorder::*;
 use core::mem::transmute;
 use core::str;
 
@@ -12,9 +11,9 @@ impl WasmMiniLoader {
     /// Minimal valid module size, Magic(4) + Version(4) + Empty sections(0) = 8
     const MINIMAL_MOD_SIZE: usize = 8;
     /// Magic number of WebAssembly Binary Format
-    const MAGIC: u32 = 0x6D736100;
+    pub const MAGIC: [u8; 4] = *b"\0asm";
     /// Current Version
-    const VER_CURRENT: u32 = 0x0000_0001;
+    pub const VER_CURRENT: [u8; 4] = *b"\x01\0\0\0";
 
     #[inline]
     #[cfg(target_endian = "little")]
@@ -24,10 +23,10 @@ impl WasmMiniLoader {
 
     /// Identify the file format
     #[inline]
-    pub fn identity(blob: &[u8]) -> bool {
-        blob.len() >= Self::MINIMAL_MOD_SIZE
-            && LE::read_u32(&blob[0..4]) == Self::MAGIC
-            && LE::read_u32(&blob[4..8]) == Self::VER_CURRENT
+    pub fn identify(bytes: &[u8]) -> bool {
+        bytes.len() >= Self::MINIMAL_MOD_SIZE
+            && &bytes[0..4] == Self::MAGIC
+            && &bytes[4..8] == Self::VER_CURRENT
     }
 
     pub fn load_sections(blob: &[u8]) -> Result<Vec<WasmSection>, WasmDecodeErrorType> {

@@ -1,6 +1,7 @@
 //! Classes to synchronize
 
 pub mod fifo;
+pub mod rwlock_nb;
 pub mod semaphore;
 pub mod signal;
 pub mod spinlock;

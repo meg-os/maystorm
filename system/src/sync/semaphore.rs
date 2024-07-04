@@ -1,14 +1,12 @@
 // Semaphore
 
-use super::{fifo::ConcurrentFifo, signal::SignallingObject};
+use super::fifo::ConcurrentFifo;
+use super::signal::SignallingObject;
 use crate::*;
-use alloc::{boxed::Box, sync::Arc};
-use core::{
-    marker::PhantomData,
-    pin::Pin,
-    sync::atomic::*,
-    task::{Context, Poll, Waker},
-};
+use core::marker::PhantomData;
+use core::pin::Pin;
+use core::sync::atomic::*;
+use core::task::{Context, Poll, Waker};
 use futures_util::Future;
 
 /// counting semaphore

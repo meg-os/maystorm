@@ -1,18 +1,12 @@
 use super::devfs::DevFs;
-use crate::{
-    fs::ramfs::RamFs,
-    sync::{RwLock, RwLockReadGuard},
-    task::scheduler::Scheduler,
-    *,
-};
-use alloc::{
-    borrow::ToOwned, collections::BTreeMap, fmt, format, string::String, sync::Arc, vec::Vec,
-};
-use core::{fmt::Display, num::NonZeroU64};
-use megstd::{
-    fs::FileType,
-    io::{Error, ErrorKind, Read, Result, Write},
-};
+use crate::fs::ramfs::RamFs;
+use crate::sync::{RwLock, RwLockReadGuard};
+use crate::task::scheduler::Scheduler;
+use crate::*;
+use core::fmt::{self, Display};
+use core::num::NonZeroU128;
+use megstd::fs::FileType;
+use megstd::io::{Error, ErrorKind, Read, Result, Write};
 use myos_archive::ArchiveReader;
 
 pub use megstd::sys::fs_imp::OpenOptions;
@@ -41,12 +35,17 @@ impl FileManager {
 
     #[inline]
     fn _unable_to_create(path: &str, err: Error) -> ! {
-        panic!("Unable to create {path}: {err:?}");
+        panic!("Unable to create {path}: {err}");
+    }
+
+    #[inline]
+    fn _unable_to_create_initrd(path: &str, err: Error) -> ! {
+        panic!("Failed to process file in the initrd: {path}: {err}");
     }
 
     #[inline]
     fn _unable_to_write_to(path: &str, err: Error) -> ! {
-        panic!("Unable to write to {path}: {err:?}");
+        panic!("Unable to write to {path}: {err}");
     }
 
     pub unsafe fn init(initrd_base: *mut u8, initrd_size: usize) {
@@ -85,14 +84,14 @@ impl FileManager {
                             path,
                         ));
                         Self::mkdir2(&path)
-                            .unwrap_or_else(|err| Self::_unable_to_create(&path, err));
+                            .unwrap_or_else(|err| Self::_unable_to_create_initrd(&path, err));
                         cwd = path;
                     }
                     myos_archive::Entry::File(name, _xattr, content) => {
                         let path = Self::_join_path(&Self::_canonical_path_components(&cwd, name));
                         // log!("FILE {path}");
                         let mut file = Self::creat(&path)
-                            .unwrap_or_else(|err| Self::_unable_to_create(&path, err));
+                            .unwrap_or_else(|err| Self::_unable_to_create_initrd(&path, err));
                         file.write(content).unwrap_or_else(|err| {
                             Self::_unable_to_write_to(&path, err);
                         });
@@ -142,7 +141,7 @@ impl FileManager {
         Self::_canonical_path_components(Scheduler::current_pid().cwd().as_str(), path)
     }
 
-    pub fn canonical_path(path: &str) -> String {
+    pub fn canonicalize(path: &str) -> String {
         Self::_join_path(&Self::canonical_path_components(path))
     }
 
@@ -158,7 +157,7 @@ impl FileManager {
         let shared = FileManager::shared();
         let mount_points = shared.mount_points.read().unwrap();
 
-        let fq_path = format!("{}{}", Self::canonical_path(path), Self::PATH_SEPARATOR);
+        let fq_path = format!("{}{}", Self::canonicalize(path), Self::PATH_SEPARATOR);
 
         let mut prefixes = mount_points.keys().collect::<Vec<_>>();
         prefixes.sort();
@@ -307,8 +306,8 @@ impl FileManager {
     }
 
     pub fn rename(old_path: &str, new_path: &str) -> Result<()> {
-        let old_path = format!("{}{}", Self::canonical_path(old_path), Self::PATH_SEPARATOR);
-        let new_path = format!("{}{}", Self::canonical_path(new_path), Self::PATH_SEPARATOR);
+        let old_path = format!("{}{}", Self::canonicalize(old_path), Self::PATH_SEPARATOR);
+        let new_path = format!("{}{}", Self::canonicalize(new_path), Self::PATH_SEPARATOR);
 
         if old_path == new_path {
             return Ok(());
@@ -355,24 +354,24 @@ impl FileManager {
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct INodeType(NonZeroU64);
+pub struct INodeType(NonZeroU128);
 
 impl INodeType {
     #[inline]
-    pub const unsafe fn new_unchecked(val: u64) -> Self {
-        Self(NonZeroU64::new_unchecked(val))
+    pub const unsafe fn new_unchecked(val: u128) -> Self {
+        Self(NonZeroU128::new_unchecked(val))
     }
 
     #[inline]
-    pub const fn new(val: u64) -> Option<Self> {
-        match NonZeroU64::new(val) {
+    pub const fn new(val: u128) -> Option<Self> {
+        match NonZeroU128::new(val) {
             Some(v) => Some(Self(v)),
             None => None,
         }
     }
 
     #[inline]
-    pub const fn get(&self) -> u64 {
+    pub const fn get(&self) -> u128 {
         self.0.get()
     }
 }
@@ -387,7 +386,7 @@ pub trait FsDriver {
     /// Device name if mounted on physical device, otherwise name of file system driver
     fn device_name(&self) -> String;
     /// Return mount options as string
-    fn description(&self) -> String;
+    fn description(&self) -> Option<String>;
     /// Returns the inode of the root directory
     fn root_dir(&self) -> INodeType;
     /// Reads the specified directory

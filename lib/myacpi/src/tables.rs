@@ -222,7 +222,7 @@ impl Xsdt {
     }
 
     #[inline]
-    pub fn find<T: AcpiTable>(&self) -> impl Iterator<Item = &T> {
+    pub fn find<'a, T: AcpiTable + 'a>(&'a self) -> impl Iterator<Item = &'a T> {
         self.tables().map(|v| v.assume()).filter_map(|v| v)
     }
 
@@ -232,8 +232,9 @@ impl Xsdt {
     }
 
     #[inline]
-    pub fn fadt(&self) -> Option<&Fadt> {
-        self.find_first()
+    #[track_caller]
+    pub fn fadt(&self) -> &Fadt {
+        self.find_first().unwrap()
     }
 }
 

@@ -3,13 +3,15 @@
 use super::tty::{NullTty, Tty, TtyRead, TtyReadResult, TtyWrite};
 use crate::system::*;
 use crate::ui::font::*;
-use alloc::boxed::Box;
-use core::{fmt, future::Future, pin::Pin};
+use crate::*;
+use core::fmt;
+use core::future::Future;
+use core::pin::Pin;
 use megstd::drawing::*;
 
 pub struct EmConsole {
-    x: usize,
-    y: usize,
+    x: u32,
+    y: u32,
     fg_color: Color,
     bg_color: Color,
     font: &'static FixedFontDriver<'static>,
@@ -18,7 +20,7 @@ pub struct EmConsole {
 impl EmConsole {
     const DEFAULT_FG_COLOR: Color = Color::LIGHT_GRAY;
     const DEFAULT_BG_COLOR: Color = Color::from_rgb(0x000000);
-    const PADDING: isize = 8;
+    const PADDING: i32 = 8;
 
     #[inline]
     pub const fn new(font: &'static FixedFontDriver<'static>) -> Self {
@@ -38,7 +40,6 @@ impl EmConsole {
 
         // check bounds
         let (cols, _rows) = self.dims();
-        let cols = cols as usize;
         // let rows = rows as usize;
         if self.x >= cols {
             self.x = 0;
@@ -72,8 +73,8 @@ impl EmConsole {
             }
             _ => {
                 let origin = Point::new(
-                    self.x as isize * font_size.width + Self::PADDING,
-                    self.y as isize * font_size.height + Self::PADDING,
+                    (self.x * font_size.width) as i32 + Self::PADDING,
+                    (self.y * font_size.height) as i32 + Self::PADDING,
                 );
                 screen.fill_rect(
                     Rect {
@@ -109,22 +110,22 @@ impl TtyWrite for EmConsole {
         Ok(())
     }
 
-    fn dims(&self) -> (isize, isize) {
+    fn dims(&self) -> (u32, u32) {
         let font = self.font;
         let font_size = Size::new(font.width(), font.line_height());
         let screen = System::main_screen().unwrap();
-        let cols = (screen.width() as isize - Self::PADDING * 2) / font_size.width();
-        let rows = (screen.height() as isize - Self::PADDING * 2) / font_size.height();
+        let cols = (screen.width() as i32 - Self::PADDING * 2) as u32 / font_size.width();
+        let rows = (screen.height() as i32 - Self::PADDING * 2) as u32 / font_size.height();
         (cols, rows)
     }
 
-    fn cursor_position(&self) -> (isize, isize) {
-        (self.x as isize, self.y as isize)
+    fn cursor_position(&self) -> (u32, u32) {
+        (self.x, self.y)
     }
 
-    fn set_cursor_position(&mut self, x: isize, y: isize) {
-        self.x = x as usize;
-        self.y = y as usize;
+    fn set_cursor_position(&mut self, x: u32, y: u32) {
+        self.x = x;
+        self.y = y;
     }
 
     fn is_cursor_enabled(&self) -> bool {
