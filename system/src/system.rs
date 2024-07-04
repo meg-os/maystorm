@@ -44,10 +44,10 @@ static mut SYSTEM: UnsafeCell<System> = UnsafeCell::new(System::new());
 
 impl System {
     const SYSTEM_NAME: &'static str = "MEG-OS";
-    const SYSTEM_CODENAME: &'static str = "Maystorm-13";
+    const SYSTEM_CODENAME: &'static str = "codename Maystorm-13";
     const SYSTEM_SHORT_NAME: &'static str = "myos";
     const RELEASE: &'static str = "alpha";
-    const VERSION: Version<'static> = Version::new(0, 12, 999, Self::RELEASE);
+    const VERSION: Version<'static> = Version::new(0, 13, 0, Self::RELEASE);
 
     #[inline]
     const fn new() -> Self {
