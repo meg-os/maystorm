@@ -1,12 +1,14 @@
 //! Vector and Matrix
-
+use crate::GlFloat;
+use core::f64::consts::{FRAC_PI_2, PI, TAU};
 use core::mem::size_of;
 use core::mem::transmute;
+use core::ops::Div;
 use core::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use num_traits::Zero;
 
-// use core::f64::consts::{FRAC_PI_2, PI, TAU};
-// use libm::{cos, sin, sqrt, sqrtf};
+#[allow(unused_imports)]
+use libm::{cos, sin, sqrt, sqrtf};
 
 macro_rules! vec_mat_impl {
     { $vis:vis struct $class:ident ( $n_elements:literal, $($param:ident,)* ); } => {
@@ -339,7 +341,140 @@ impl<T> From<Vec4<T>> for Vec2<T> {
 pub trait AffineMatrix {}
 
 pub trait Transform<T: AffineMatrix> {
-    fn transformed(&self, affine_matrix: &T) -> Self;
+    // fn transformed(&self, affine_matrix: &T) -> Self;
 
     fn transform(&mut self, affine_matrix: &T);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AffineMatrix2d(Mat3<GlFloat>);
+
+impl AffineMatrix for AffineMatrix2d {}
+
+impl AffineMatrix2d {
+    /// 2D Affine Matrix
+    ///
+    /// ```plain
+    /// (x')   (m00 m01 m02) (x)
+    /// (y') = (m10 m11 m12) (y)
+    /// (1)    (  0   0   1) (1) <- redundant
+    /// ```
+    #[inline]
+    pub const fn matrix(
+        m00: GlFloat,
+        m01: GlFloat,
+        m02: GlFloat,
+        m10: GlFloat,
+        m11: GlFloat,
+        m12: GlFloat,
+    ) -> Self {
+        Self(Mat3 {
+            m00,
+            m01,
+            m02,
+            m10,
+            m11,
+            m12,
+            m20: 0.0,
+            m21: 0.0,
+            m22: 1.0,
+        })
+    }
+
+    #[inline]
+    pub fn new(translation: Vec2<GlFloat>, rotation: Radian, scale: GlFloat) -> Self {
+        let cos = cos(rotation.value());
+        let sin = sin(rotation.value());
+        Self::matrix(
+            cos * scale,
+            0.0 - sin * scale,
+            translation.x,
+            sin * scale,
+            cos * scale,
+            translation.y,
+        )
+    }
+
+    #[inline]
+    pub fn transformed(&self, vertex: &Vec2<GlFloat>) -> Vec2<GlFloat> {
+        let x1 = vertex.x;
+        let y1 = vertex.y;
+        Vec2::new(
+            self.0.m00 * x1 + self.0.m01 * y1 + self.0.m02,
+            self.0.m10 * x1 + self.0.m11 * y1 + self.0.m12,
+        )
+    }
+}
+
+impl Transform<AffineMatrix2d> for Vec2<GlFloat> {
+    #[inline]
+    fn transform(&mut self, affine_matrix: &AffineMatrix2d) {
+        *self = affine_matrix.transformed(self)
+    }
+}
+
+impl Transform<AffineMatrix2d> for [Vec2<GlFloat>] {
+    #[inline]
+    fn transform(&mut self, affine_matrix: &AffineMatrix2d) {
+        for vertex in self.iter_mut() {
+            vertex.transform(affine_matrix);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Radian(f64);
+
+impl Radian {
+    pub const FRAC_PI_2: Self = Self(FRAC_PI_2);
+
+    pub const PI: Self = Self(PI);
+
+    pub const TAU: Self = Self(TAU);
+
+    #[inline]
+    pub const fn new(value: f64) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub const fn value(&self) -> f64 {
+        self.0
+    }
+}
+
+impl Add<f64> for Radian {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: f64) -> Self::Output {
+        Self(self.0.add(rhs))
+    }
+}
+
+impl Sub<f64> for Radian {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: f64) -> Self::Output {
+        Self(self.0.sub(rhs))
+    }
+}
+
+impl Mul<f64> for Radian {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self(self.0.mul(rhs))
+    }
+}
+
+impl Div<f64> for Radian {
+    type Output = Self;
+
+    #[inline]
+    fn div(self, rhs: f64) -> Self::Output {
+        Self(self.0.div(rhs))
+    }
 }

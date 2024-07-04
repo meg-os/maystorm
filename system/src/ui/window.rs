@@ -1,5 +1,3 @@
-use self::system::System;
-
 use super::font::*;
 use super::text::*;
 use super::theme::Theme;
@@ -11,6 +9,7 @@ use crate::sync::{
     RwLock,
     {fifo::*, semaphore::*, spinlock::SpinMutex},
 };
+use crate::system::System;
 use crate::task::scheduler::*;
 use crate::*;
 use core::cell::UnsafeCell;

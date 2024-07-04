@@ -36,6 +36,8 @@ impl Invocation {
 }
 
 impl Invoke for Invocation {
+    const INCOMPATIBILITY_MESSAGE: &str = "The Operating System you are attempting to launch requires an IvyBridge or later processor.";
+
     #[inline]
     fn is_compatible(&self) -> bool {
         Feature::RDTSCP.exists()

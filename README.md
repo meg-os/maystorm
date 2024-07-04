@@ -22,7 +22,6 @@ A hobby operating system written in Rust that supports WebAssembly.
 ## Build Environment
 
 * Rust nightly
-  * `rustup component add rust-src --toolchain nightly-aarch64-unknown-linux-gnu`
   * `rustup target add wasm32-unknown-unknown`
 * nasm
 * qemu + ovmf (optional)
@@ -62,7 +61,7 @@ The latest version is recommended whenever possible.
 
 MIT License
 
-&copy; 2020-2023 MEG-OS Project.
+&copy; 2020-2024 MEG-OS Project.
 
 ### Wall paper
 

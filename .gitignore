@@ -10,3 +10,5 @@ var
 temp
 
 # x86_64-unknown-uefi.json
+
+rustc-ice-*

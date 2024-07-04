@@ -71,6 +71,26 @@ impl Point {
     }
 }
 
+impl From<Vec2<GlFloat>> for Point {
+    #[inline]
+    fn from(value: Vec2<GlFloat>) -> Self {
+        Self {
+            x: value.x as GlSInt,
+            y: value.y as GlSInt,
+        }
+    }
+}
+
+impl From<Point> for Vec2<GlFloat> {
+    #[inline]
+    fn from(value: Point) -> Self {
+        Self {
+            x: value.x as GlFloat,
+            y: value.y as GlFloat,
+        }
+    }
+}
+
 impl Add<GlSInt> for Point {
     type Output = Self;
 

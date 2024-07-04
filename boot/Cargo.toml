@@ -9,7 +9,6 @@ members = [
 opt-level = "z"
 
 [workspace.dependencies]
-bitflags = { version="2.5.0" }
-uefi = { version="0.28.0", features = ['alloc']}
+uefi = { version="0.29.0", features = ['global_allocator']}
 uefi-services = { version="0.25.0", default-features = false}
-uefi-raw = {version="0.5.2"}
+uefi-raw = {version="0.6.0"}

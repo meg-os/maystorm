@@ -9,6 +9,7 @@ use core::ptr::slice_from_raw_parts_mut;
 use core::slice;
 use libm::{ceil, floor};
 use paste::paste;
+use vec::Vec2;
 
 pub trait Image
 where
@@ -2331,6 +2332,42 @@ impl OperationalBitmap {
                 plot(self, x, intery + ONE, fpart(intery));
                 intery += gradient;
             }
+        }
+    }
+
+    pub fn draw_polygon<T>(&mut self, polygon: &[Vec2<T>], color: u8)
+    where
+        Vec2<T>: Into<Vec2<GlSInt>>,
+        T: Copy,
+    {
+        let mut polygon = polygon.iter();
+        let len = polygon.len();
+        let Some(vertex0) = polygon.next() else {
+            return;
+        };
+        let mut vertex1 = vertex0;
+        while let Some(vertex2) = polygon.next() {
+            self.draw_line_anti_aliasing_f(
+                (*vertex1).into(),
+                (*vertex2).into(),
+                |bitmap, point, level| unsafe {
+                    bitmap.process_pixel_unchecked(point, |c| {
+                        c.saturating_add((color as f64 * level) as u8)
+                    });
+                },
+            );
+            vertex1 = vertex2;
+        }
+        if len > 2 {
+            self.draw_line_anti_aliasing_f(
+                (*vertex0).into(),
+                (*vertex1).into(),
+                |bitmap, point, level| unsafe {
+                    bitmap.process_pixel_unchecked(point, |c| {
+                        c.saturating_add((color as f64 * level) as u8)
+                    });
+                },
+            );
         }
     }
 

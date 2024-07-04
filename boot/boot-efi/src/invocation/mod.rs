@@ -13,6 +13,8 @@ cfg_match! {
 }
 
 pub trait Invoke {
+    const INCOMPATIBILITY_MESSAGE: &str;
+
     fn is_compatible(&self) -> bool;
 
     unsafe fn invoke_kernel(

@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::*;
-use bitflags::*;
 use core::mem::size_of;
 use core::ptr::{self, addr_of_mut};
 use core::slice;
@@ -254,22 +253,53 @@ impl PageManager {
     }
 }
 
-bitflags! {
-    #[derive(Debug, Clone, Copy)]
-    struct PageAttributes: u64 {
-        const PRESENT       = 0x0000_0000_0000_0001;
-        const WRITE         = 0x0000_0000_0000_0002;
-        const USER          = 0x0000_0000_0000_0004;
-        const PWT           = 0x0000_0000_0000_0008;
-        const PCD           = 0x0000_0000_0000_0010;
-        const ACCESS        = 0x0000_0000_0000_0020;
-        const DIRTY         = 0x0000_0000_0000_0040;
-        const PAT           = 0x0000_0000_0000_0080;
-        const LARGE         = 0x0000_0000_0000_0080;
-        const GLOBAL        = 0x0000_0000_0000_0100;
-        // const AVL           = 0x0000_0000_0000_0E00;
-        const LARGE_PAT     = 0x0000_0000_0000_1000;
-        const NO_EXECUTE    = 0x8000_0000_0000_0000;
+#[derive(Debug, Clone, Copy)]
+pub struct PageAttributes(u64);
+
+impl PageAttributes {
+    pub const PRESENT: Self = Self(0x0000_0000_0000_0001);
+    pub const WRITE: Self = Self(0x0000_0000_0000_0002);
+    pub const USER: Self = Self(0x0000_0000_0000_0004);
+    pub const PWT: Self = Self(0x0000_0000_0000_0008);
+    pub const PCD: Self = Self(0x0000_0000_0000_0010);
+    pub const ACCESS: Self = Self(0x0000_0000_0000_0020);
+    pub const DIRTY: Self = Self(0x0000_0000_0000_0040);
+    pub const PAT: Self = Self(0x0000_0000_0000_0080);
+    pub const LARGE: Self = Self(0x0000_0000_0000_0080);
+    pub const GLOBAL: Self = Self(0x0000_0000_0000_0100);
+    // pub const AVL: Self = Self(0x0000_0000_0000_0E00);
+    pub const LARGE_PAT: Self = Self(0x0000_0000_0000_1000);
+    pub const NO_EXECUTE: Self = Self(0x8000_0000_0000_0000);
+
+    #[inline]
+    pub fn from_bits_truncate(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[inline]
+    pub const fn bits(&self) -> u64 {
+        self.0
+    }
+
+    #[inline]
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+}
+
+impl BitOr<Self> for PageAttributes {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign<Self> for PageAttributes {
+    #[inline]
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
     }
 }
 

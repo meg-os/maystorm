@@ -1,7 +1,6 @@
 //! MEG-OS Boot Procotol
 
 #![no_std]
-#![feature(const_trait_impl)]
 
 use core::fmt;
 
@@ -28,7 +27,7 @@ pub struct BootInfo {
     pub flags: BootFlags,
 }
 
-impl const Default for BootInfo {
+impl Default for BootInfo {
     #[inline]
     fn default() -> Self {
         Self {
@@ -112,7 +111,7 @@ impl BootFlags {
     }
 }
 
-impl const Default for BootFlags {
+impl Default for BootFlags {
     #[inline]
     fn default() -> Self {
         Self::empty()

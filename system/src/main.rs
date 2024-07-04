@@ -6,6 +6,7 @@
 #![no_main]
 
 extern crate alloc;
+use alloc::str;
 use bootprot::*;
 use core::fmt::{self, Write};
 use core::num::NonZeroU8;
@@ -32,9 +33,13 @@ unsafe fn _start(info: &BootInfo) -> ! {
 
 static mut MAIN: Shell = Shell::new();
 
+const ENV_HOME: &str = "HOME";
+const ENV_PATH: &str = "PATH";
+const ENV_PATH_EXT: &str = "PATHEXT";
+const SEP_PATH: &str = ":";
+
 pub struct Shell {
-    home: Option<String>,
-    path_ext: Vec<String>,
+    env: BTreeMap<String, String>,
 }
 
 enum ParsedCmdLine {
@@ -46,8 +51,7 @@ impl Shell {
     #[inline]
     const fn new() -> Self {
         Self {
-            home: None,
-            path_ext: Vec::new(),
+            env: BTreeMap::new(),
         }
     }
 
@@ -64,16 +68,31 @@ impl Shell {
     // Shell entry point
     fn start() {
         let shared = unsafe { Self::shared_mut() };
-        shared.home = Some("/boot".to_owned());
+        let mut path_ext = Vec::new();
         for ext in RuntimeEnvironment::supported_extensions() {
-            shared.path_ext.push(ext.to_string());
+            path_ext.push(format!(".{ext}"));
         }
+        shared.set_env(ENV_PATH_EXT, &path_ext.join(SEP_PATH));
 
-        // Self::exec_cmd("ver");
+        shared.set_env(ENV_HOME, "/boot");
+        shared.set_env(ENV_PATH, "/bin:/boot:/boot/bin:/boot/system/bin");
+
         Self::exec_cmd("cd");
+
+        let _ = Self::exec_script("startup.txt");
 
         Scheduler::spawn_async(Self::repl_main());
         Scheduler::perform_tasks();
+    }
+
+    #[inline]
+    fn set_env(&mut self, key: &str, value: &str) {
+        self.env.insert(key.to_owned(), value.to_owned());
+    }
+
+    #[inline]
+    fn get_env(&self, key: &str) -> Option<&str> {
+        self.env.get(key).map(|v| v.as_str())
     }
 
     async fn repl_main() {
@@ -94,6 +113,23 @@ impl Shell {
                 Self::exec_cmd(&cmdline);
             }
         }
+    }
+
+    fn exec_script(path: &str) -> Result<(), megstd::io::Error> {
+        let mut file = FileManager::open(path, OpenOptions::new().read(true))?;
+
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
+
+        let script = core::str::from_utf8(&buf).map_err(|_| megstd::io::ErrorKind::InvalidData)?;
+
+        for line in script.lines() {
+            if !line.starts_with("#") {
+                Self::exec_cmd(line);
+            }
+        }
+
+        Ok(())
     }
 
     fn exec_cmd(cmdline: &str) {
@@ -126,7 +162,7 @@ impl Shell {
                     }
                     "ver" => {
                         println!(
-                            "{} v{} (codename {})",
+                            "{} v{} ({})",
                             System::name(),
                             System::version(),
                             System::codename()
@@ -137,6 +173,37 @@ impl Shell {
                     }
                     "shutdown" => {
                         SysInit::system_reset(true);
+                    }
+                    "env" => {
+                        let shared = unsafe { Self::shared_mut() };
+                        if let Some(arg1) = args.get(1) {
+                            if arg1.contains("=") {
+                                let mut pair = arg1.split("=");
+                                let key = pair.next().unwrap();
+                                let value = pair.next().unwrap_or_default();
+                                if value.is_empty() {
+                                    shared.env.remove(key);
+                                } else {
+                                    shared.set_env(key, value);
+                                }
+                            } else {
+                                let key = arg1;
+                                let value = shared.get_env(key).unwrap_or_default();
+                                println!("{key}={value}");
+                            }
+                        } else {
+                            for key in shared.env.keys() {
+                                let value = shared.get_env(key).unwrap_or_default();
+                                println!("{key}={value}");
+                            }
+                        }
+                    }
+                    "printenv" => {
+                        let shared = Self::shared();
+                        for key in shared.env.keys() {
+                            let value = shared.get_env(key).unwrap_or_default();
+                            println!("{key}={value}");
+                        }
                     }
                     "uptime" => {
                         let systime = System::system_time();
@@ -272,17 +339,30 @@ impl Shell {
 
     fn spawn(path: &str, argv: &[&str], wait_until: bool) -> usize {
         Self::spawn_main(path, argv, wait_until).unwrap_or_else(|| {
-            let mut sb = String::new();
-            let shared = Self::shared();
-            for ext in &shared.path_ext {
-                sb.clear();
-                write!(sb, "{}.{}", path, ext).unwrap();
-                match Self::spawn_main(sb.as_str(), argv, wait_until) {
-                    Some(v) => return v,
-                    None => (),
+            let main_path = path;
+            if !main_path.contains("/") {
+                let mut sb = String::new();
+                let shared = Self::shared();
+                let path_ext = shared.get_env(ENV_PATH_EXT).unwrap_or_default();
+                let path_ext = path_ext.split(SEP_PATH);
+                let path = shared.get_env(ENV_PATH).unwrap_or_default();
+                let path = path.split(SEP_PATH);
+                for prefix in [""].into_iter().chain(path) {
+                    for ext in path_ext.clone() {
+                        sb.clear();
+                        if prefix.is_empty() {
+                            write!(sb, "{}{}", main_path, ext).unwrap();
+                        } else {
+                            write!(sb, "{}/{}{}", prefix, main_path, ext).unwrap();
+                        }
+                        match Self::spawn_main(sb.as_str(), argv, wait_until) {
+                            Some(v) => return v,
+                            None => (),
+                        }
+                    }
                 }
             }
-            println!("Command not found: {}", path);
+            println!("Command not found: {}", main_path);
             1
         })
     }
@@ -343,7 +423,7 @@ impl Shell {
     }
 
     fn cmd_cd(argv: &[&str]) {
-        let home = Self::shared().home.as_ref().unwrap().as_str();
+        let home = Self::shared().get_env(ENV_HOME).unwrap_or("/");
         let path = argv.get(1).unwrap_or(&home);
         match FileManager::chdir(path) {
             Ok(_) => (),

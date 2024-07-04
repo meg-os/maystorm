@@ -15,7 +15,6 @@ TARGET_KERNEL	= system/target/$(KRNL_ARCH)/release/kernel.bin
 TARGET_ISO	= var/megos.iso
 ALL_TARGETS	= boot kernel apps
 VAR_INITRD	= var/initrd/
-INITRD_DEV	= var/initrd/dev/
 INITRD_FILES	= LICENSE $(ASSETS)initrd/* apps/target/wasm32-unknown-unknown/release/*.wasm $(VAR_INITRD)*
 
 SMP_X64			= system/src/arch/x64/smpinit
@@ -55,7 +54,7 @@ $(EFI_VENDOR):
 	mkdir -p $(EFI_VENDOR)
 
 run:
-	$(QEMU_X64) -machine q35 -cpu SandyBridge -smp 4,cores=2,threads=2 \
+	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4,cores=2,threads=2 \
 -bios $(OVMF_X64) \
 -rtc base=localtime,clock=host \
 -device virtio-net-pci \
@@ -77,7 +76,7 @@ run_up:
 -monitor stdio
 
 run_x86:
-	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4,cores=2,threads=2 \
+	$(QEMU_X64) -machine q35 -cpu IvyBridge -smp 4 \
 -bios $(OVMF_X86) \
 -rtc base=localtime,clock=host \
 -device nec-usb-xhci,id=xhci -device usb-tablet \
@@ -95,7 +94,7 @@ $(SMP_X64_BIN): $(SMP_X64_ASM)
 	nasm -f bin $< -o $@
 
 $(VAR_INITRD):
-	-mkdir -p $(INITRD_DEV)
+	-mkdir -p $(VAR_INITRD)
 
 install: test $(EFI_VENDOR) $(EFI_BOOT) $(ALL_TARGETS) tools/mkinitrd/src/*.rs $(VAR_INITRD)
 	if [ -f $(EFI_CUSTOM_LOADER_X64) ]; then cp $(EFI_CUSTOM_LOADER_X64) $(BOOT_EFI_BOOT_X64); \

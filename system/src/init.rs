@@ -20,6 +20,7 @@ use megstd::drawing::*;
 use megstd::io::Read;
 use megstd::string::*;
 use megstd::time::SystemTime;
+use vec::*;
 
 static IS_GUI_BOOT: bool = true;
 static mut SHUTDOWN_COMMAND: MaybeUninit<EventQueue<ShutdownCommand>> = MaybeUninit::uninit();
@@ -76,7 +77,7 @@ impl SysInit {
 
         if !IS_GUI_BOOT {
             println!(
-                "{} v{} (codename {})",
+                "{} v{} ({})",
                 System::name(),
                 System::version(),
                 System::codename(),
@@ -106,7 +107,6 @@ impl SysInit {
             let bg_window = RawWindowBuilder::new()
                 .style(WindowStyle::NO_SHADOW | WindowStyle::FULLSCREEN | WindowStyle::SUSPENDED)
                 .level(WindowLevel::POPUP_BARRIER_BG)
-                .bg_color(Color::BLUE)
                 .build("");
 
             bg_window.draw(|bitmap| {
@@ -218,40 +218,61 @@ enum ShutdownCommand {
 #[allow(dead_code)]
 async fn slpash_task(f: fn()) {
     if IS_GUI_BOOT {
+        WindowManager::set_barrier_opacity(Alpha8::OPAQUE);
         if let Some(window) = unsafe { BG_TERMINAL.take() } {
             window.close();
         }
 
-        let width = 480;
-        let height = 240;
+        let mut bitmap_logo = None;
+        for path in ["/boot/system/boot.png"] {
+            if let Ok(mut file) = FileManager::open(path, OpenOptions::new().read(true)) {
+                let mut vec = Vec::new();
+                if file.read_to_end(&mut vec).is_err() {
+                    continue;
+                };
+                if let Ok(bitmap) = ImageLoader::load(vec.as_slice()) {
+                    bitmap_logo = Some(bitmap);
+                    break;
+                }
+            }
+        }
+
+        let size = if let Some(ref bitmap) = bitmap_logo {
+            bitmap.size()
+        } else {
+            Size::new(300, 200)
+        };
 
         let window = RawWindowBuilder::new()
             .style(WindowStyle::NO_SHADOW)
-            .size(Size::new(width, height))
+            .size(size)
             .bg_color(Color::TRANSPARENT)
             .level(WindowLevel::POPUP)
             .build("");
 
         window.draw(|bitmap| {
-            bitmap.clear();
-            let Some(font) = FontDescriptor::new(FontFamily::SansSerif, 48) else {
-                return;
-            };
-            AttributedString::new()
-                .font(&font)
-                .color(Color::LIGHT_GRAY)
-                .middle_center()
-                .text("HELLO")
-                .draw_text(bitmap, bitmap.bounds(), 0);
+            if let Some(ref logo) = bitmap_logo {
+                bitmap.blt(logo.as_ref(), Point::zero(), logo.bounds());
+            } else {
+                let Some(font) = FontDescriptor::new(FontFamily::SansSerif, 48) else {
+                    return;
+                };
+                AttributedString::new()
+                    .font(&font)
+                    .color(Color::LIGHT_GRAY)
+                    .middle_center()
+                    .text("HELLO")
+                    .draw_text(bitmap, bitmap.bounds(), 0);
+            }
         });
-        // window.show();
-        WindowManager::set_barrier_opacity(Alpha8::OPAQUE);
-
-        Timer::sleep_async(Duration::from_millis(1000)).await;
+        window.show();
 
         Scheduler::spawn_async(status_bar_main());
         Scheduler::spawn_async(activity_monitor_main());
-        Scheduler::spawn_async(_notification_task());
+
+        Timer::sleep_async(Duration::from_millis(2000)).await;
+
+        Scheduler::spawn_async(notification_task());
 
         for path in ["/boot/wall.mpic", "/boot/wall.jpg", "/boot/wall.png"] {
             if let Ok(mut file) = FileManager::open(path, OpenOptions::new().read(true)) {
@@ -267,14 +288,12 @@ async fn slpash_task(f: fn()) {
             }
         }
 
-        Timer::sleep_async(Duration::from_millis(500)).await;
-
         let animation = AnimatedProp::new(1.0, 0.0, Duration::from_millis(500));
 
         window.create_timer(0, Duration::from_millis(1));
         window.show();
 
-        while let Some(message) = window.wait_message() {
+        while let Some(message) = window.await_message().await {
             match message {
                 WindowMessage::Timer(timer_id) => match timer_id {
                     0 => {
@@ -294,7 +313,7 @@ async fn slpash_task(f: fn()) {
 
         WindowManager::set_barrier_opacity(Alpha8::TRANSPARENT);
     } else {
-        Scheduler::spawn_async(_notification_task());
+        Scheduler::spawn_async(notification_task());
     }
 
     WindowManager::set_pointer_states(true, true, true);
@@ -693,7 +712,7 @@ async fn activity_monitor_main() {
 const NOTIFICATION_MESSAGE_ID: usize = 0;
 
 /// Simple Notification Task
-async fn _notification_task() {
+async fn notification_task() {
     let window_width = 288;
     let window_height = 96;
     let margin = EdgeInsets::padding_each(8);
@@ -1011,4 +1030,118 @@ fn font_test(
     ats.draw_text(bitmap, rect, max_lines);
 
     bounds.height() as i32
+}
+
+#[allow(dead_code)]
+async fn clock_task() {
+    Timer::sleep_async(Duration::from_millis(500)).await;
+
+    let bg_color = Color::WHITE;
+    let fg_color = Color::DARK_GRAY;
+
+    let width = 240;
+    let height = 240;
+    let window_size = Size::new(width as u32, height as u32);
+    let padding = 4;
+    let radius = ((width.min(height) - padding) / 2) as f64;
+    let center = Point::new(width / 2, height / 2);
+    let scale = 1.0;
+
+    let window = RawWindowBuilder::new()
+        .size(window_size)
+        .bg_color(bg_color)
+        .build("Retro Clock");
+
+    let mut work_bitmap = OperationalBitmap::new(window_size);
+
+    window.create_timer(0, Duration::from_millis(1));
+
+    while let Some(message) = window.await_message().await {
+        match message {
+            WindowMessage::Timer(_id) => {
+                window.set_needs_display();
+                window.create_timer(0, Duration::from_millis(100));
+            }
+            WindowMessage::Draw => {
+                let time = System::system_time();
+                let epoch = time.duration_since(SystemTime::UNIX_EPOCH).unwrap();
+                let tod = epoch.as_secs() as f64 % 86400.0;
+                let h = tod / 3600.0;
+                let m = tod / 60.0 % 60.0;
+                let s = tod % 60.0;
+
+                work_bitmap.reset();
+
+                for i in 0..60 {
+                    let affine =
+                        AffineMatrix2d::new(center.into(), Radian::TAU * (i as f64 / 60.0), scale);
+
+                    if i % 15 == 0 {
+                        let mut polygon = [
+                            Vec2::new(0.0, 0.0 - radius),
+                            Vec2::new(2.0, 4.0 - radius),
+                            Vec2::new(0.0, 8.0 - radius),
+                            Vec2::new(-2.0, 4.0 - radius),
+                        ];
+                        polygon.transform(&affine);
+                        work_bitmap.draw_polygon(&polygon, 0xFF);
+                    } else if i % 5 == 0 {
+                        let mut polygon =
+                            [Vec2::new(0.0, 1.0 - radius), Vec2::new(0.0, 7.0 - radius)];
+                        polygon.transform(&affine);
+                        work_bitmap.draw_polygon(&polygon, 0xFF);
+                    } else {
+                        let mut polygon =
+                            [Vec2::new(0.0, 2.0 - radius), Vec2::new(0.0, 6.0 - radius)];
+                        polygon.transform(&affine);
+                        work_bitmap.draw_polygon(&polygon, 0x55);
+                    }
+                }
+
+                let mut polygon = [
+                    Vec2::new(0.0, 0.0 - radius * 0.5),
+                    Vec2::new(4.0, 0.0),
+                    Vec2::new(0.0, 8.0),
+                    Vec2::new(-4.0, 0.0),
+                ];
+                polygon.transform(&AffineMatrix2d::new(
+                    center.into(),
+                    Radian::TAU * h / 12.0,
+                    scale,
+                ));
+                work_bitmap.draw_polygon(&polygon, 0xCC);
+
+                let mut polygon = [
+                    Vec2::new(0.0, 16.0 - radius),
+                    Vec2::new(2.0, 0.0),
+                    Vec2::new(0.0, 4.0),
+                    Vec2::new(-2.0, 0.0),
+                ];
+                polygon.transform(&AffineMatrix2d::new(
+                    center.into(),
+                    Radian::TAU * m / 60.0,
+                    scale,
+                ));
+                work_bitmap.draw_polygon(&polygon, 0xCC);
+
+                let mut polygon = [Vec2::new(0.0, 16.0 - radius), Vec2::new(0.0, 4.0)];
+                polygon.transform(&AffineMatrix2d::new(
+                    center.into(),
+                    Radian::TAU * s / 60.0,
+                    scale,
+                ));
+                work_bitmap.draw_polygon(&polygon, 0xEE);
+
+                window.draw(|bitmap| {
+                    bitmap.fill_rect(bitmap.bounds(), bg_color);
+
+                    work_bitmap.draw_to(bitmap, Point::new(0, 0), work_bitmap.bounds(), fg_color);
+                });
+            }
+            WindowMessage::Close => {
+                window.close();
+            }
+            _ => window.handle_default_message(message),
+        }
+    }
 }

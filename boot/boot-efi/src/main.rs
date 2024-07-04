@@ -59,11 +59,7 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
     // Check the CPU
     let invocation = Invocation::new();
     if !invocation.is_compatible() {
-        writeln!(
-            st.stdout(),
-            "Attempts to boot the operating system, but it is not compatible with this processor."
-        )
-        .unwrap();
+        writeln!(st.stdout(), "{}", Invocation::INCOMPATIBILITY_MESSAGE).unwrap();
         return Status::LOAD_ERROR;
     }
 
@@ -155,7 +151,7 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
     // Exit Boot Services
     //
 
-    let (_st, mm) = st.exit_boot_services(MemoryType::LOADER_DATA);
+    let (_st, mm) = unsafe { st.exit_boot_services(MemoryType::LOADER_DATA) };
 
     // ------------------------------------------------------------------------
 

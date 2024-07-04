@@ -6,6 +6,7 @@ use core::{
 };
 
 /// Control Register 0
+#[allow(dead_code)]
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy)]
 pub struct CR0(usize);
@@ -117,6 +118,7 @@ impl CR3 {
 
 /// Control Register 4
 #[repr(transparent)]
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct CR4(usize);
 

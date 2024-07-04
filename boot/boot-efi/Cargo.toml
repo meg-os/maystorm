@@ -12,6 +12,5 @@ lib-efi = {path = "../lib-efi"}
 myelf = {path="../../lib/myelf"}
 x86 = {path="../../lib/x86"}
 
-bitflags.workspace = true
 uefi.workspace = true
 uefi-services.workspace = true
