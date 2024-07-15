@@ -320,10 +320,11 @@ impl Hoe {
             20 => {
                 // beep
                 let ctx = match self.audio_ctx {
-                    Some(ref v) => v,
+                    Some(ref v) => v.clone(),
                     None => {
-                        self.audio_ctx = Some(AudioContext::new());
-                        self.audio_ctx.as_ref().unwrap()
+                        let ctx = AudioContext::new();
+                        self.audio_ctx = Some(ctx.clone());
+                        ctx
                     }
                 };
                 if let Some(note) = self.note.take() {
@@ -333,7 +334,7 @@ impl Hoe {
                 if freq >= 20.0 && freq <= 20_000.0 {
                     let mut osc = ctx.create_oscillator(freq, OscType::Square);
                     osc.connect(ctx.destination());
-                    let mut note = NoteOnParams::new(Arc::downgrade(ctx), 0.0, 0.9, 0.1);
+                    let mut note = NoteOnParams::new(Arc::downgrade(&ctx), 0.0, 0.9, 0.1);
                     note.connect(osc);
                     self.note = note.start().ok();
                 }

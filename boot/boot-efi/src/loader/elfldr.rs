@@ -3,6 +3,7 @@
 use super::*;
 use crate::page::*;
 use core::intrinsics::transmute;
+use core::marker::PhantomData;
 use core::ptr::copy_nonoverlapping;
 use myelf::*;
 
@@ -58,7 +59,7 @@ impl<'a> ElfLoader<'a> {
     }
 
     #[inline]
-    fn program_header(&self) -> impl Iterator<Item = elf64::ProgramHeader> {
+    fn program_header(&'a self) -> impl Iterator<Item = &'a elf64::ProgramHeader> {
         unsafe {
             ElfProgramHeaderIter::new(
                 self.blob.as_ptr().add(self.elf_hdr.e_phoff as usize),
@@ -116,34 +117,36 @@ impl ImageLoader for ElfLoader<'_> {
 }
 
 #[derive(Clone)]
-struct ElfProgramHeaderIter {
+struct ElfProgramHeaderIter<'a> {
     base: *const u8,
     entry_size: usize,
     n_entries: usize,
     index: usize,
+    _phantom: PhantomData<&'a ()>,
 }
 
-impl ElfProgramHeaderIter {
+impl<'a> ElfProgramHeaderIter<'a> {
     #[inline]
-    const fn new(base: *const u8, entry_size: usize, n_entries: usize) -> Self {
+    const unsafe fn new(base: *const u8, entry_size: usize, n_entries: usize) -> Self {
         Self {
             base,
             entry_size,
             n_entries,
             index: 0,
+            _phantom: PhantomData,
         }
     }
 }
 
-impl Iterator for ElfProgramHeaderIter {
-    type Item = elf64::ProgramHeader;
+impl<'a> Iterator for ElfProgramHeaderIter<'a> {
+    type Item = &'a elf64::ProgramHeader;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.n_entries {
             let item = unsafe {
                 let p = self.base.add(self.index * self.entry_size) as *const elf64::ProgramHeader;
-                *p
+                &*p
             };
             self.index += 1;
             Some(item)

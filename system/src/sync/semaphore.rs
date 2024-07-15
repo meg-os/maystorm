@@ -156,11 +156,13 @@ impl AsyncSemaphore {
     }
 
     #[inline]
+    #[must_use]
     pub fn wait(self: Pin<Arc<Self>>) -> Pin<Box<dyn Future<Output = ()>>> {
         Box::pin(AsyncSemaphoreObserver { sem: self.clone() })
     }
 
     #[inline]
+    #[must_use]
     pub fn wait_ok<T: 'static>(
         self: &Pin<Arc<Self>>,
     ) -> Pin<Box<dyn Future<Output = Result<(), T>>>> {
