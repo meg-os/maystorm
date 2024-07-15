@@ -193,14 +193,7 @@ impl UsbHub2Driver {
         Ok(())
     }
 
-    pub async fn attach_device(
-        self: &Arc<Self>,
-        port: UsbHubPortNumber,
-    ) -> Result<UsbAddress, UsbError> {
-        self.set_port_feature(UsbHub2PortFeatureSel::PORT_RESET, port)
-            .await?;
-        Timer::sleep_async(self.hub_desc.power_on_to_power_good()).await;
-
+    pub async fn port_reset(self: &Arc<Self>, port: UsbHubPortNumber) -> Result<(), UsbError> {
         let status = self.get_port_status(port).await?;
         self.clear_status_changes(
             status,
@@ -209,27 +202,49 @@ impl UsbHub2Driver {
                 UsbHub2PortFeatureSel::C_PORT_ENABLE,
                 UsbHub2PortFeatureSel::C_PORT_SUSPEND,
                 UsbHub2PortFeatureSel::C_PORT_OVER_CURRENT,
-                UsbHub2PortFeatureSel::C_PORT_RESET,
             ],
             port,
         )
         .await?;
-
+        self.set_port_feature(UsbHub2PortFeatureSel::PORT_RESET, port)
+            .await?;
         Timer::sleep_async(self.hub_desc.power_on_to_power_good()).await;
+        let status = self.get_port_status(port).await?;
+        self.clear_status_changes(status, &[UsbHub2PortFeatureSel::C_PORT_RESET], port)
+            .await?;
 
-        if status
-            .status
-            .contains(UsbHub2PortStatusBit::PORT_CONNECTION | UsbHub2PortStatusBit::PORT_ENABLE)
-        {
-            let speed = status.status.speed();
-            return self.device.attach_child_device(port, speed).await;
+        Ok(())
+    }
+
+    pub async fn attach_device(
+        self: &Arc<Self>,
+        port: UsbHubPortNumber,
+    ) -> Result<UsbAddress, UsbError> {
+        self.port_reset(port).await?;
+
+        for _ in 0..3 {
+            let status = self.get_port_status(port).await?;
+            if status
+                .status
+                .contains(UsbHub2PortStatusBit::PORT_CONNECTION | UsbHub2PortStatusBit::PORT_ENABLE)
+            {
+                self.clear_status_changes(status, &[UsbHub2PortFeatureSel::C_PORT_ENABLE], port)
+                    .await?;
+
+                let speed = status.status.speed();
+                return self.device.attach_child_device(port, speed).await;
+            }
+            Timer::sleep_async(self.hub_desc.power_on_to_power_good()).await;
         }
 
         Err(UsbError::InvalidParameter)
     }
 
-    pub async fn detatch_device(&self, port: UsbHubPortNumber) -> Result<(), UsbError> {
+    pub async fn detatch_device(self: &Arc<Self>, port: UsbHubPortNumber) -> Result<(), UsbError> {
         self.device.detach_child_device(port).await?;
+
+        self.port_reset(port).await?;
+
         Ok(())
     }
 

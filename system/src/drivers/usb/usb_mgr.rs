@@ -700,6 +700,7 @@ impl UsbDeviceContext {
         let Some(child) = self.child_device(port) else {
             return Err(UsbError::InvalidParameter);
         };
+        self.device().children.lock().remove(&port);
         UsbManager::remove_device(child)
     }
 
@@ -734,7 +735,7 @@ impl UsbDeviceContext {
         buffer: &mut Vec<u8>,
         min_len: UsbLength,
         max_len: UsbLength,
-    ) -> Result<(), UsbError> {
+    ) -> Result<UsbLength, UsbError> {
         buffer.clear();
         buffer
             .try_reserve(max_len.as_usize())
@@ -745,7 +746,7 @@ impl UsbDeviceContext {
             .await
             .map(|new_len| {
                 buffer.resize(new_len.as_usize(), 0);
-                ()
+                new_len
             })
     }
 

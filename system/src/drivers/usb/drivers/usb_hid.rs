@@ -221,7 +221,13 @@ impl UsbHidDriver {
         let mut mouse_state = MouseState::empty();
         let mut buffer = Vec::new();
         loop {
-            match device.read_to_vec(ep, &mut buffer, UsbLength(1), ps).await {
+            match device
+                .read_to_vec(ep, &mut buffer, UsbLength::ZERO, ps)
+                .await
+            {
+                Ok(UsbLength::ZERO) => {
+                    // Read size is zero, so nothing to do.
+                }
                 Ok(_) => {
                     // if report_desc.has_report_id() && buffer.iter().fold(0, |a, b| a | *b) != 0 {
                     //     println!("HID {:?}", HexDump(&buffer));
@@ -356,7 +362,10 @@ impl UsbHidDriver {
                         }
                     }
                 }
-                Err(UsbError::Aborted) => break,
+                Err(UsbError::Aborted) => {
+                    println!("USB HID Aborted {}:{}", addr.as_u8(), if_no.0);
+                    break;
+                }
                 // Err(UsbError::InvalidParameter) => {
                 //     log!(
                 //         "USB HID error {}:{} {:?}",

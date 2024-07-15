@@ -283,6 +283,8 @@ pub struct UsbAlternateSettingNumber(pub u8);
 pub struct UsbLength(pub u16);
 
 impl UsbLength {
+    pub const ZERO: Self = Self(0);
+
     #[inline]
     pub const fn as_usize(&self) -> usize {
         self.0 as usize
@@ -301,6 +303,13 @@ impl UsbLength {
     #[inline]
     pub const fn zero() -> Self {
         Self(0)
+    }
+}
+
+impl From<UsbLength> for usize {
+    #[inline]
+    fn from(value: UsbLength) -> Self {
+        value.as_usize()
     }
 }
 
