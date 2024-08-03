@@ -448,8 +448,8 @@ impl UsbDeviceContext {
                         // log!(
                         //     "USB {} UNKNOWN CAPABILITY {} {:02x}",
                         //     addr.as_u8(),
-                        //     bos[cursor],
-                        //     bos[cursor + 2],
+                        //     bos_blob[cursor],
+                        //     bos_blob[cursor + 2],
                         // );
                     }
                 }

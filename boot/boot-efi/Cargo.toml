@@ -10,7 +10,8 @@ version = "0.1.0"
 bootprot = {path = "../../lib/bootprot"}
 lib-efi = {path = "../lib-efi"}
 myelf = {path="../../lib/myelf"}
-x86 = {path="../../lib/x86"}
 
 uefi.workspace = true
-uefi-services.workspace = true
+
+[target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
+x86 = {path="../../lib/x86"}

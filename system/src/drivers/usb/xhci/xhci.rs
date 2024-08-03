@@ -999,8 +999,8 @@ impl Xhci {
         };
         let addr = unsafe { UsbAddress::from_nonzero_unchecked(slot_id.0) };
 
-        self.port2slot[port_id.0.get() as usize].store(slot_id.0.get(), Ordering::Relaxed);
-        self.slot2port[slot_id.0.get() as usize].store(port_id.0.get(), Ordering::Relaxed);
+        self.port2slot[port_id.0.get() as usize].store(slot_id.0.get(), Ordering::Release);
+        self.slot2port[slot_id.0.get() as usize].store(port_id.0.get(), Ordering::Release);
 
         let device_context_size = self.context_size * 32;
         let device_context = unsafe { MemoryManager::alloc_pages(device_context_size) }
@@ -1034,7 +1034,9 @@ impl Xhci {
 
         let trb = TrbAddressDeviceCommand::new(slot_id, input_context_pa);
         match self.execute_command(trb.as_trb()) {
-            Ok(_result) => (),
+            Ok(_result) => {
+                // log!("ADDRESS DEVICE OK {:?}", slot_id);
+            }
             Err(err) => {
                 log!(
                     "ROOT PORT {} ADDRESS_DEVICE ERROR {:?}",
@@ -1362,21 +1364,22 @@ impl Xhci {
             port.clear_changes();
             self.attach_root_device(port_id).await;
 
-            self.slot_by_port(port_id)
-                    .and_then(|v| UsbManager::device_by_addr(unsafe{UsbAddress::from_nonzero_unchecked(v.0)}))
-                // .map(|device| {
-                //     log!(
-                //         "{:03}.{:03} VID {} PID {} class {} {}{}",
-                //         device.parent().map(|v| v.as_u8()).unwrap_or_default(),
-                //         device.addr().as_u8(),
-                //         device.vid(),
-                //         device.pid(),
-                //         device.class(),
-                //         if device.is_configured() { "" } else { "? " },
-                //         device.preferred_device_name().unwrap_or("Unknown Device"),
-                //     );
-                // })
-                ;
+            // self.slot_by_port(port_id)
+            //     .and_then(|v| {
+            //         UsbManager::device_by_addr(unsafe { UsbAddress::from_nonzero_unchecked(v.0) })
+            //     })
+            //     .map(|device| {
+            //         log!(
+            //             "{:03}.{:03} VID {} PID {} class {} {}{}",
+            //             device.parent().map(|v| v.as_u8()).unwrap_or_default(),
+            //             device.addr().as_u8(),
+            //             device.vid(),
+            //             device.pid(),
+            //             device.class(),
+            //             if device.is_configured() { "" } else { "? " },
+            //             device.preferred_device_name().unwrap_or("Unknown Device"),
+            //         );
+            //     });
         } else {
             port.power_off();
             Timer::sleep_async(Duration::from_millis(100)).await;

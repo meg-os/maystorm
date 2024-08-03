@@ -31,7 +31,7 @@ libm = {version="0.2.8"}
 mpic = { git = "https://github.com/neri/mpic", default-features = false, features = ["alloc"] }
 png-decoder = { default-features = false, git = "https://github.com/neri/png-decoder" }
 rapid-qoi = { version="0.6.1",default-features = false, features = ["alloc"] }
-zune-jpeg = { version="0.4.11",default-features = false }
+zune-jpeg = { version="0.4.13",default-features = false }
 
 [profile.release]
 lto = true

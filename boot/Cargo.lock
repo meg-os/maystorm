@@ -21,8 +21,7 @@ dependencies = [
  "bootprot",
  "lib-efi",
  "myelf",
- "uefi 0.29.0",
- "uefi-services",
+ "uefi",
  "x86",
 ]
 
@@ -40,7 +39,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 name = "lib-efi"
 version = "0.1.0"
 dependencies = [
- "uefi 0.29.0",
+ "uefi",
 ]
 
 [[package]]
@@ -110,9 +109,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.68"
+version = "2.0.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "901fa70d88b9d6c98022e23b4136f9f3e54e4662c3bc1bd1d84a42a9a0f0c1e9"
+checksum = "dc4b9b9bf2add8093d3f2c0204471e951b2285580335de42f9d2534f3ae7a8af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -130,45 +129,18 @@ dependencies = [
 
 [[package]]
 name = "uefi"
-version = "0.28.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9c0a56dc9fed2589aad6ddca11c2584968fc21f227b5d7083bb8961d26a69fa"
+checksum = "c937815260747b061aaa63a0f721d350a5740b72f166c5a4180226aa6fa204b9"
 dependencies = [
  "bitflags",
  "cfg-if",
  "log",
  "ptr_meta",
  "ucs2",
- "uefi-macros 0.13.0",
- "uefi-raw 0.5.2",
+ "uefi-macros",
+ "uefi-raw",
  "uguid",
-]
-
-[[package]]
-name = "uefi"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e8fb42b46b5e5afaa49a237714d3259ccbf740ba68cbf25d715471b15cabe04"
-dependencies = [
- "bitflags",
- "cfg-if",
- "log",
- "ptr_meta",
- "ucs2",
- "uefi-macros 0.14.0",
- "uefi-raw 0.6.0",
- "uguid",
-]
-
-[[package]]
-name = "uefi-macros"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26a7b1c2c808c3db854a54d5215e3f7e7aaf5dcfbce095598cba6af29895695d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.68",
 ]
 
 [[package]]
@@ -179,18 +151,7 @@ checksum = "4f345e42323c05e41e29e409505f5f8e0df7b5743340215d60344dbd79b729f4"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.68",
-]
-
-[[package]]
-name = "uefi-raw"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efa8716f52e8cab8bcedfd5052388a0f263b69fe5cc2561548dc6a530678333c"
-dependencies = [
- "bitflags",
- "ptr_meta",
- "uguid",
+ "syn 2.0.72",
 ]
 
 [[package]]
@@ -202,15 +163,6 @@ dependencies = [
  "bitflags",
  "ptr_meta",
  "uguid",
-]
-
-[[package]]
-name = "uefi-services"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62d502e54e05da57380e0b6f3cb1baa89860e4ae314afb5a17080ed14379b6e2"
-dependencies = [
- "uefi 0.28.0",
 ]
 
 [[package]]

@@ -1263,7 +1263,7 @@ exception_handler!(PageFault, handle_default_exception);
 exception_handler_noerr!(SimdException, handle_default_exception);
 exception_handler_noerr!(MachineCheck, handle_default_exception);
 
-/// Haribote OS System call Emulation
+// Haribote OS System call Emulation
 #[naked]
 unsafe extern "C" fn cpu_int40_handler() {
     asm!(

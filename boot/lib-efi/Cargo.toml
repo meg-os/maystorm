@@ -8,4 +8,3 @@ version = "0.1.0"
 
 [dependencies]
 uefi.workspace = true
-# uefi-services.workspace = true

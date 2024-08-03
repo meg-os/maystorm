@@ -645,7 +645,7 @@ impl UsbEndpointDescriptor {
 
     #[inline]
     pub const fn max_packet_size(&self) -> UsbLength {
-        UsbLength(self.wMaxPacketSize.as_u16())
+        self.wMaxPacketSize.as_length()
     }
 
     #[inline]

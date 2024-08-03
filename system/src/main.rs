@@ -561,10 +561,10 @@ impl Shell {
                 println!(", Memory {}.{:02} GB", gb, mb);
 
                 if let Some(manufacturer_name) = device.manufacturer_name() {
-                    println!("  Manufacturer: {}", manufacturer_name);
+                    println!("Manufacturer: {}", manufacturer_name);
                 }
                 if let Some(model_name) = device.model_name() {
-                    println!("  Model: {}", model_name);
+                    println!("Model: {}", model_name);
                 }
             }
             "cpu" => {
