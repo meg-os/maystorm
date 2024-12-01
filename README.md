@@ -62,17 +62,3 @@ The latest version is recommended whenever possible.
 MIT License
 
 &copy; 2020-2024 MEG-OS Project.
-
-### Wall paper
-
-* CC BY-SA 4.0 &copy; 猫(1010) 
-
-## Contributors
-
-### Kernel
-
-[![Nerry](https://github.com/neri.png?size=50)](https://github.com/neri "Nerry")
-
-### Wall paper
-
-[![猫(1010)](https://github.com/No000.png?size=50)](https://github.com/No000 "猫(1010)")
