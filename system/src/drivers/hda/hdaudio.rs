@@ -365,9 +365,9 @@ impl HdAudioController {
             self.output_pins.first().map(|v| *v)
         } else {
             for device in [
-                DefaultDevice::HPOut,
-                DefaultDevice::LineOut,
                 DefaultDevice::Speaker,
+                DefaultDevice::LineOut,
+                DefaultDevice::HPOut,
             ] {
                 for pin in self.output_pins.iter() {
                     let widget = self.widgets.get(&pin).unwrap();
@@ -376,20 +376,6 @@ impl HdAudioController {
                         && config.port_connectivity() != PortConnectivity::NoPhysicalConnection
                         && config.default_device() == device
                     {
-                        return Some(*pin);
-                    }
-                }
-            }
-
-            for device in [
-                DefaultDevice::HPOut,
-                DefaultDevice::LineOut,
-                DefaultDevice::DigitalOtherOut,
-            ] {
-                for pin in self.output_pins.iter() {
-                    let widget = self.widgets.get(&pin).unwrap();
-                    let config = widget.configuration_default();
-                    if config.sequence() == 0 && config.default_device() == device {
                         return Some(*pin);
                     }
                 }

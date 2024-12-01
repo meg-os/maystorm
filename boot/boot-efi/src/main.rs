@@ -1,7 +1,6 @@
 //! MEG-OS Boot loader for UEFI
 #![no_std]
 #![no_main]
-#![deny(unsafe_op_in_unsafe_fn)]
 #![feature(cfg_match)]
 
 pub mod invocation;
@@ -9,20 +8,25 @@ pub mod loader;
 pub mod page;
 
 use bootprot::*;
-use core::fmt::Write;
 use core::mem::*;
 use invocation::*;
-use lib_efi::*;
+use lib_efi::{debug, get_file};
 use loader::*;
 use page::*;
-use uefi::data_types::Guid;
-use uefi::proto::console::gop;
-use uefi::table::{
-    boot::{MemoryType, OpenProtocolAttributes, OpenProtocolParams, SearchType},
-    cfg::{ACPI2_GUID, SMBIOS_GUID},
+use uefi::{
+    boot::{
+        exit_boot_services, image_handle, locate_handle_buffer, open_protocol, MemoryType,
+        OpenProtocolAttributes, OpenProtocolParams, SearchType,
+    },
+    guid,
+    prelude::*,
+    proto::console::gop,
+    table::cfg::{ACPI2_GUID, SMBIOS_GUID},
+    Guid, Identify,
 };
-use uefi::Identify;
-use uefi::{guid, prelude::*};
+
+#[allow(unused_imports)]
+use core::fmt::Write;
 
 //#define EFI_DTB_TABLE_GUID  {0xb1b621d5, 0xf19c, 0x41a5, {0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0}}
 const DTB_GUID: Guid = guid!("b1b621d5-f19c-41a5-830b-d9152c69aae0");
@@ -31,45 +35,45 @@ static KERNEL_PATH: &str = "/EFI/MEGOS/kernel.bin";
 static INITRD_PATH: &str = "/EFI/MEGOS/initrd.img";
 
 #[entry]
-fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
-    uefi::helpers::init(&mut st).unwrap();
+fn main() -> Status {
+    uefi::helpers::init().unwrap();
+    let handle = image_handle();
 
     let mut info = BootInfo {
         platform: PlatformType::UefiNative,
         color_mode: ColorMode::Argb32,
         ..Default::default()
     };
-    let bs = st.boot_services();
 
     // Find the ACPI Table
-    info.acpi_rsdptr = match st.find_config_table(ACPI2_GUID) {
+    info.acpi_rsdptr = match find_config_table(ACPI2_GUID) {
         Some(val) => val,
         None => {
-            writeln!(st.stdout(), "Error: ACPI Table Not Found").unwrap();
+            uefi::println!("Error: ACPI Table Not Found");
             return Status::LOAD_ERROR;
         }
     };
 
     // Find DeviceTree
-    info.dtb = st.find_config_table(DTB_GUID).unwrap_or_default();
+    info.dtb = find_config_table(DTB_GUID).unwrap_or_default();
 
     // Find the SMBIOS Table
-    info.smbios = st.find_config_table(SMBIOS_GUID).unwrap_or_default();
+    info.smbios = find_config_table(SMBIOS_GUID).unwrap_or_default();
 
     // Check the CPU
     let invocation = Invocation::new();
     if !invocation.is_compatible() {
-        writeln!(st.stdout(), "{}", Invocation::INCOMPATIBILITY_MESSAGE).unwrap();
+        uefi::println!("{}", Invocation::INCOMPATIBILITY_MESSAGE);
         return Status::LOAD_ERROR;
     }
 
     // Init graphics
     if let Ok(handle_buffer) =
-        bs.locate_handle_buffer(SearchType::ByProtocol(&gop::GraphicsOutput::GUID))
+        locate_handle_buffer(SearchType::ByProtocol(&gop::GraphicsOutput::GUID))
     {
         if let Some(handle_gop) = handle_buffer.first() {
             if let Ok(mut gop) = unsafe {
-                bs.open_protocol::<gop::GraphicsOutput>(
+                open_protocol::<gop::GraphicsOutput>(
                     OpenProtocolParams {
                         handle: *handle_gop,
                         agent: handle,
@@ -101,23 +105,23 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
         }
     }
 
-    // println!("ACPI:   {:012x}", info.acpi_rsdptr);
-    // println!("SMBIOS: {:012x}", info.smbios);
-    // println!("DTB:    {:012x}", info.dtb);
+    // uefi::println!("ACPI:   {:012x}", info.acpi_rsdptr);
+    // uefi::println!("SMBIOS: {:012x}", info.smbios);
+    // uefi::println!("DTB:    {:012x}", info.dtb);
     // todo!();
 
     // Load the KERNEL
-    let kernel = match get_file(handle, &bs, KERNEL_PATH) {
+    let kernel = match get_file(handle, KERNEL_PATH) {
         Ok(v) => v,
         Err(status) => {
-            writeln!(st.stdout(), "Error: Load failed {}", KERNEL_PATH).unwrap();
+            uefi::println!("Error: Load failed {}", KERNEL_PATH);
             return status;
         }
     };
     let kernel = match ElfLoader::parse(&kernel) {
         Some(v) => v,
         None => {
-            writeln!(st.stdout(), "Error: BAD KERNEL SIGNATURE FOUND").unwrap();
+            uefi::println!("Error: BAD KERNEL SIGNATURE FOUND");
             return Status::LOAD_ERROR;
         }
     };
@@ -125,23 +129,23 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
     info.kernel_base = bounds.0.as_u64();
 
     // Load the initrd
-    match get_file(handle, &bs, INITRD_PATH) {
+    match get_file(handle, INITRD_PATH) {
         Ok(blob) => {
             info.initrd_base = blob.as_ptr() as u32;
             info.initrd_size = blob.len() as u32;
             forget(blob);
         }
         Err(status) => {
-            writeln!(st.stdout(), "Error: Load failed {}", INITRD_PATH).unwrap();
+            uefi::println!("Error: Load failed {}", INITRD_PATH);
             return status;
         }
     };
 
     unsafe {
-        match PageManager::init_first(&bs) {
+        match PageManager::init_first() {
             Ok(_) => (),
             Err(err) => {
-                writeln!(st.stdout(), "Error: {:?}", err).unwrap();
+                uefi::println!("Error: {:?}", err);
                 return err;
             }
         }
@@ -151,7 +155,7 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
     // Exit Boot Services
     //
 
-    let (_st, mm) = unsafe { st.exit_boot_services(MemoryType::LOADER_DATA) };
+    let mm = unsafe { exit_boot_services(MemoryType::LOADER_DATA) };
 
     // ------------------------------------------------------------------------
 
@@ -163,22 +167,18 @@ fn efi_main(handle: Handle, mut st: SystemTable<Boot>) -> Status {
         let new_sp = VirtualAddress(info.kernel_base | 0x3FFFF000);
         PageManager::valloc(new_sp - stack_size, stack_size);
 
-        // println!("Starting kernel...");
+        // lib_efi::println!("Starting kernel...");
         invocation.invoke_kernel(info, entry, new_sp);
     }
 }
 
-pub trait MyUefiLib {
-    fn find_config_table(&self, _: ::uefi::Guid) -> Option<u64>;
-}
-
-impl MyUefiLib for SystemTable<::uefi::table::Boot> {
-    fn find_config_table(&self, guid: ::uefi::Guid) -> Option<u64> {
-        for entry in self.config_table() {
+fn find_config_table(guid: ::uefi::Guid) -> Option<u64> {
+    uefi::system::with_config_table(|items| {
+        for entry in items {
             if entry.guid == guid {
                 return Some(entry.address as u64);
             }
         }
         None
-    }
+    })
 }

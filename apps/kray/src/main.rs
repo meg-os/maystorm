@@ -10,6 +10,7 @@ Ported From: https://qiita.com/doxas/items/477fda867da467116f8d
 
 extern crate libm;
 use core::cell::UnsafeCell;
+use core::ptr::addr_of_mut;
 use libm::{cos, fabs, floor, sqrt};
 use megstd::drawing::vec::*;
 use megstd::window::*;
@@ -28,7 +29,7 @@ fn _start() {
         .bitmap_argb32()
         .build("ray");
     let mut bitmap = BitmapRefMut32::from_bytes(
-        unsafe { DATA.get_mut() },
+        unsafe { (&mut *addr_of_mut!(DATA)).get_mut() },
         Size::new(BITMAP_WIDTH, BITMAP_HEIGHT),
     );
 

@@ -11,6 +11,7 @@ use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::fmt;
 use core::mem::{transmute, MaybeUninit};
+use core::ptr::{addr_of, addr_of_mut};
 use core::sync::atomic::*;
 use megstd::drawing::*;
 use megstd::time::SystemTime;
@@ -69,7 +70,7 @@ impl System {
     pub unsafe fn init(info: &BootInfo, main: fn() -> ()) -> ! {
         assert_call_once!();
 
-        let shared = SYSTEM.get_mut();
+        let shared = (&mut *addr_of_mut!(SYSTEM)).get_mut();
         shared.boot_flags = info.flags;
         shared.initrd_base = PhysicalAddress::new(info.initrd_base as u64);
         shared.initrd_size = info.initrd_size as usize;
@@ -151,12 +152,12 @@ impl System {
 
     #[inline]
     unsafe fn shared_mut() -> &'static mut System {
-        SYSTEM.get_mut()
+        (&mut *addr_of_mut!(SYSTEM)).get_mut()
     }
 
     #[inline]
     fn shared() -> &'static System {
-        unsafe { &*SYSTEM.get() }
+        unsafe { &*(&*addr_of!(SYSTEM)).get() }
     }
 
     /// Returns the name of the current system.

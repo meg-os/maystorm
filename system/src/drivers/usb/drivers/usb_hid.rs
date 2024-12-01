@@ -77,12 +77,14 @@ impl UsbHidDriver {
             }
         };
 
-        device.configure_endpoint(endpoint.descriptor()).unwrap();
+        let _result = Self::set_idle(&device, if_no, 0).await.is_ok();
 
         // disable boot protocol
         if class.sub_class() == UsbSubClass(1) {
             let _result = Self::set_boot_protocol(&device, if_no, false).await.is_ok();
         }
+
+        device.configure_endpoint(endpoint.descriptor()).unwrap();
 
         Ok(Task::new(Self::_usb_hid_task(
             device.clone(),
@@ -230,7 +232,7 @@ impl UsbHidDriver {
                 }
                 Ok(_) => {
                     // if report_desc.has_report_id() && buffer.iter().fold(0, |a, b| a | *b) != 0 {
-                    //     println!("HID {:?}", HexDump(&buffer));
+                    //     println!("HID {:?}", crate::utils::HexDump(&buffer));
                     // }
 
                     let (app, _report_id) = if report_desc.has_report_id() {
@@ -288,6 +290,10 @@ impl UsbHidDriver {
                             key_state.process_report(report);
                         }
                         HidUsage::MOUSE => {
+                            // if buffer.iter().fold(0, |a, b| a | *b) != 0 {
+                            //     println!("MOS {:?}", crate::utils::HexDump(&buffer));
+                            // }
+
                             let mut is_absolute = false;
                             let mut report = MouseReport::default();
                             for item in app.input_items() {
@@ -450,6 +456,26 @@ impl UsbHidDriver {
                 .index_if(if_no),
                 max_len,
                 data,
+            )
+            .await
+    }
+
+    #[inline]
+    pub async fn set_idle(
+        device: &UsbDeviceContext,
+        if_no: UsbInterfaceNumber,
+        value: u16,
+    ) -> Result<(), UsbError> {
+        device
+            .control_send(
+                UsbControlSetupData::request(
+                    UsbControlRequestBitmap(0x21),
+                    UsbControlRequest::HID_SET_IDLE,
+                )
+                .value(value)
+                .index_if(if_no),
+                UsbLength::zero(),
+                &[],
             )
             .await
     }

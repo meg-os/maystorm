@@ -1,7 +1,11 @@
 use crate::fs::*;
 use crate::*;
 use ab_glyph::Font as AbFont;
-use core::{cell::UnsafeCell, mem::MaybeUninit};
+use core::{
+    cell::UnsafeCell,
+    mem::MaybeUninit,
+    ptr::{addr_of, addr_of_mut},
+};
 use megstd::{drawing::*, io::Read, prelude::*};
 
 #[allow(dead_code)]
@@ -39,12 +43,12 @@ impl FontManager {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*FONT_MANAGER.get() }
+        unsafe { &*(&*addr_of!(FONT_MANAGER)).get() }
     }
 
     #[inline]
     unsafe fn shared_mut<'a>() -> &'a mut Self {
-        FONT_MANAGER.get_mut()
+        (&mut *addr_of_mut!(FONT_MANAGER)).get_mut()
     }
 
     pub unsafe fn init() {

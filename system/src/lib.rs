@@ -1,11 +1,9 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
-#![feature(asm_const)]
 #![feature(naked_functions)]
 //
 #![feature(alloc_error_handler)]
 //
-#![feature(const_mut_refs)]
 #![feature(iter_advance_by)]
 #![feature(maybe_uninit_uninit_array)]
 #![feature(negative_impls)]

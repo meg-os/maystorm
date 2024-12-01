@@ -1197,10 +1197,13 @@ impl UsbControlRequest {
     // pub const SYNC_FRAME:Self = Self(0x0C);
     pub const SET_SEL: Self = Self(0x30);
     pub const SET_ISOCH_DELAY: Self = Self(0x31);
-    pub const HID_GET_REPORT: Self = Self(1);
-    pub const HID_SET_REPORT: Self = Self(9);
-    pub const HID_SET_PROTOCOL: Self = Self(11);
-    pub const SET_HUB_DEPTH: Self = Self(12);
+    pub const HID_GET_REPORT: Self = Self(0x01);
+    pub const HID_GET_IDLE: Self = Self(0x02);
+    pub const HID_GET_PROTOCOL: Self = Self(0x03);
+    pub const HID_SET_REPORT: Self = Self(0x09);
+    pub const HID_SET_IDLE: Self = Self(0x0A);
+    pub const HID_SET_PROTOCOL: Self = Self(0x0B);
+    pub const SET_HUB_DEPTH: Self = Self(0x0C);
 }
 
 #[repr(u16)]

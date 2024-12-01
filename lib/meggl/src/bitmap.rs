@@ -1736,7 +1736,7 @@ impl<'a> From<&'a BitmapRefMut8<'a>> for BitmapRef<'a> {
 
 impl<'a> From<&'a BitmapRef32<'a>> for BitmapRef<'a> {
     #[inline]
-    fn from(val: &'a BitmapRef32<'a>) -> BitmapRef {
+    fn from(val: &'a BitmapRef32<'a>) -> BitmapRef<'a> {
         BitmapRef::Argb32(val)
     }
 }

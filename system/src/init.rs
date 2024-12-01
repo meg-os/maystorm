@@ -15,6 +15,7 @@ use crate::ui::window::*;
 use crate::utils::{EventManager, SimpleMessagePayload};
 use crate::*;
 use core::mem::{transmute, MaybeUninit};
+use core::ptr::addr_of_mut;
 use core::time::Duration;
 use megstd::drawing::*;
 use megstd::io::Read;
@@ -85,7 +86,7 @@ impl SysInit {
         }
 
         unsafe {
-            SHUTDOWN_COMMAND.write(EventQueue::new(100));
+            (&mut *addr_of_mut!(SHUTDOWN_COMMAND)).write(EventQueue::new(100));
         }
 
         SpawnOption::with_priority(Priority::Normal)
@@ -205,7 +206,7 @@ impl SysInit {
     }
 
     fn shutdown_command<'a>() -> &'a EventQueue<ShutdownCommand> {
-        unsafe { SHUTDOWN_COMMAND.assume_init_ref() }
+        unsafe { (&mut *addr_of_mut!(SHUTDOWN_COMMAND)).assume_init_ref() }
     }
 }
 
@@ -219,7 +220,7 @@ enum ShutdownCommand {
 async fn slpash_task(f: fn()) {
     if IS_GUI_BOOT {
         WindowManager::set_barrier_opacity(Alpha8::OPAQUE);
-        if let Some(window) = unsafe { BG_TERMINAL.take() } {
+        if let Some(window) = unsafe { (&mut *addr_of_mut!(BG_TERMINAL)).take() } {
             window.close();
         }
 

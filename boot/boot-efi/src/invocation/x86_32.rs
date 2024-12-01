@@ -3,6 +3,7 @@
 use super::*;
 use bootprot::PlatformType;
 use core::arch::asm;
+use core::ptr::addr_of_mut;
 use x86::cpuid::*;
 use x86::cr::*;
 use x86::efer::EFER;
@@ -44,8 +45,9 @@ impl Invoke for Invocation {
             }
 
             // Set up a GDT for Long Mode
-            GDT.fix_up();
-            GDT.load();
+            let gdt = &mut *addr_of_mut!(GDT);
+            gdt.fix_up();
+            gdt.load();
 
             // Set up a CR3 for Long Mode
             CR3::write(info.master_page_table as usize);

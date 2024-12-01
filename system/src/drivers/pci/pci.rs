@@ -5,6 +5,7 @@ use core::cell::UnsafeCell;
 use core::fmt;
 use core::num::NonZeroU8;
 use core::ops::Add;
+use core::ptr::{addr_of, addr_of_mut};
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PciConfigAddress {
@@ -121,12 +122,12 @@ impl Pci {
 
     #[inline]
     unsafe fn shared_mut<'a>() -> &'a mut Pci {
-        PCI.get_mut()
+        (&mut *addr_of_mut!(PCI)).get_mut()
     }
 
     #[inline]
     fn shared<'a>() -> &'a Pci {
-        unsafe { &*PCI.get() }
+        unsafe { &*(&*addr_of!(PCI)).get() }
     }
 
     pub unsafe fn init() {

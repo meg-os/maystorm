@@ -5,6 +5,7 @@ use crate::task::scheduler::*;
 use crate::*;
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
+use core::ptr::{addr_of, addr_of_mut};
 use megstd::io::{Error, ErrorKind, Read};
 use megstd::path::Path;
 use megstd::uuid::{Identify, Uuid};
@@ -38,7 +39,7 @@ impl RuntimeEnvironment {
     pub unsafe fn init() {
         assert_call_once!();
 
-        let shared = &mut *RE.get();
+        let shared = (&mut *addr_of_mut!(RE)).get_mut();
 
         shared.add_image(arle::ArleBinaryLoader::new());
 
@@ -56,7 +57,7 @@ impl RuntimeEnvironment {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*RE.get() }
+        unsafe { &*(&*addr_of!(RE)).get() }
     }
 
     #[inline]

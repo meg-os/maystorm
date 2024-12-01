@@ -3,6 +3,7 @@ use crate::sync::RwLock;
 use crate::*;
 use core::mem::MaybeUninit;
 use core::num::NonZeroU32;
+use core::ptr::{addr_of, addr_of_mut};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use megstd::fs::FileType;
 use megstd::io::{ErrorKind, Result};
@@ -25,7 +26,7 @@ impl DevFs {
     pub unsafe fn init() -> Arc<dyn FsDriver> {
         assert_call_once!();
 
-        SHARED.write(Self {
+        (&mut *addr_of_mut!(SHARED)).write(Self {
             minor_devices: RwLock::new(BTreeMap::new()),
             // next_major_device: AtomicUsize::new(0),
             next_minor_device: AtomicUsize::new(1 + ROOT_INODE.get() as usize),
@@ -39,7 +40,7 @@ impl DevFs {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { SHARED.assume_init_ref() }
+        unsafe { (&*addr_of!(SHARED)).assume_init_ref() }
     }
 
     // fn _next_major_device_no(&self) -> Option<MajorDevNo> {

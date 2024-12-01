@@ -11,6 +11,7 @@ use crate::task::scheduler::*;
 use crate::*;
 use core::cell::UnsafeCell;
 use core::mem::{size_of, transmute, ManuallyDrop};
+use core::ptr::addr_of;
 use core::ptr::{copy_nonoverlapping, null_mut};
 use core::sync::atomic::*;
 use core::time::Duration;
@@ -248,12 +249,12 @@ impl Apic {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*APIC.get() }
+        unsafe { &*(&*addr_of!(APIC)).get() }
     }
 
     #[inline]
     fn shared_mut<'a>() -> &'a mut Self {
-        unsafe { &mut *APIC.get() }
+        unsafe { &mut *(&*addr_of!(APIC)).get() }
     }
 
     pub unsafe fn register(irq: Irq, f: IrqHandler, val: usize) -> Result<(), ()> {
@@ -680,7 +681,7 @@ impl LocalApic {
     #[inline]
     #[track_caller]
     fn mmio() -> &'static MmioSlice {
-        unsafe { &*LOCAL_APIC.as_ref().unwrap().get() }
+        unsafe { &*(&*addr_of!(LOCAL_APIC)).as_ref().unwrap().get() }
     }
 
     #[inline]

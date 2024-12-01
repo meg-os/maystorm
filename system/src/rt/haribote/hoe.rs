@@ -4,6 +4,7 @@ use super::*;
 use crate::arch::cpu::LegacySyscallContext;
 use crate::io::audio::{AudioContext, FreqType, NoteControl, NoteOnParams, OscType};
 use crate::ui::window::*;
+use core::ptr::{addr_of, addr_of_mut};
 use core::slice;
 use core::str;
 use core::time::Duration;
@@ -45,7 +46,7 @@ impl HoeManager {
 
     #[inline]
     pub fn shared<'a>() -> &'a Self {
-        unsafe { &*HOE_MANAGER.get() }
+        unsafe { &*(&*addr_of!(HOE_MANAGER)).get() }
     }
 
     #[inline]
@@ -59,7 +60,7 @@ impl HoeManager {
     }
 
     pub(super) unsafe fn init() {
-        let shared = &mut *HOE_MANAGER.get();
+        let shared = (&mut *addr_of_mut!(HOE_MANAGER)).get_mut();
 
         if let Ok(mut file) =
             FileManager::open("/boot/hari/nihongo.fnt", OpenOptions::new().read(true))

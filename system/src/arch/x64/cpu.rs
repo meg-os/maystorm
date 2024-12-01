@@ -4,10 +4,11 @@ use crate::system::{ProcessorCoreType, System};
 use crate::task::scheduler::Scheduler;
 use crate::*;
 use bootprot::BootInfo;
-use core::arch::asm;
+use core::arch::{asm, naked_asm};
 use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::mem::size_of;
+use core::ptr::{addr_of, addr_of_mut};
 use core::sync::atomic::*;
 use paste::paste;
 use x86::cpuid::{cpuid, cpuid_count, Feature, NativeModelCoreType};
@@ -67,7 +68,7 @@ impl Cpu {
     pub unsafe fn init(info: &BootInfo) {
         assert_call_once!();
 
-        let shared = SHARED_CPU.get_mut();
+        let shared = (&mut *addr_of_mut!(SHARED_CPU)).get_mut();
         shared.vram_base = PhysicalAddress::new(info.vram_base);
         shared.vram_size_min =
             4 * (info.vram_stride as usize * info.screen_height as usize - 1).next_power_of_two();
@@ -201,7 +202,7 @@ impl Cpu {
 
     #[inline]
     fn shared<'a>() -> &'a SharedCpu {
-        unsafe { &*SHARED_CPU.get() }
+        unsafe { &*(&*addr_of!(SHARED_CPU)).get() }
     }
 
     #[inline]
@@ -502,7 +503,7 @@ impl CpuContextData {
         other: *const Self,
         gdt: *mut GlobalDescriptorTable,
     ) {
-        asm!(
+        naked_asm!(
             "
             mov [rdi + {CTX_RSP}], rsp
             mov [rdi + {CTX_RBP}], rbp
@@ -572,13 +573,12 @@ impl CpuContextData {
             CTX_USER_DS = const Self::CTX_USER_DS_DESC,
             USER_CS_IDX = const LEGACY_CSEL.index(),
             USER_DS_IDX = const LEGACY_DSEL.index(),
-            options(noreturn)
         );
     }
 
     #[naked]
     unsafe extern "C" fn _new_thread() {
-        asm!(
+        naked_asm!(
             "
             fninit
             mov eax, 0x00001F80
@@ -610,7 +610,6 @@ impl CpuContextData {
             call rax
             ",
             setup_new_thread = sym task::scheduler::setup_new_thread,
-            options(noreturn)
         );
     }
 }
@@ -809,7 +808,7 @@ impl InterruptDescriptorTable {
 
     #[inline]
     unsafe fn load() {
-        let idt = &*IDT.get();
+        let idt = &*(&*addr_of!(IDT)).get();
         asm!("
             push {0}
             push {1}
@@ -821,7 +820,7 @@ impl InterruptDescriptorTable {
     #[track_caller]
     pub unsafe fn register(vec: InterruptVector, offset: usize, dpl: DPL) {
         let table_offset = vec.0 as usize * 2;
-        let idt = IDT.get_mut();
+        let idt = (&mut *addr_of_mut!(IDT)).get_mut();
         if !idt.table[table_offset].is_null() {
             panic!("IDT entry #{} is already in use", vec.0);
         }
@@ -1116,7 +1115,7 @@ macro_rules! exception_handler {
             #[naked]
             #[allow(non_snake_case)]
             unsafe extern "C" fn [<exc_ $mnemonic>]() {
-                asm!("
+                naked_asm!("
                 push ${exno}
                 push rax
                 push rcx
@@ -1174,8 +1173,8 @@ macro_rules! exception_handler {
                 iretq
                 ",
                 exno = const ExceptionType::$mnemonic.as_vec().0 as usize,
-                handler = sym $handler,
-                options(noreturn));
+                handler = sym $handler
+                );
             }
         }
     };
@@ -1187,7 +1186,7 @@ macro_rules! exception_handler_noerr {
             #[naked]
             #[allow(non_snake_case)]
             unsafe extern "C" fn [<exc_ $mnemonic>]() {
-                asm!("
+                naked_asm!("
                 push 0
                 push ${exno}
                 push rax
@@ -1247,7 +1246,7 @@ macro_rules! exception_handler_noerr {
                 ",
                 exno = const ExceptionType::$mnemonic.as_vec().0 as usize,
                 handler = sym $handler,
-                options(noreturn));
+                );
             }
         }
     };
@@ -1266,7 +1265,7 @@ exception_handler_noerr!(MachineCheck, handle_default_exception);
 // Haribote OS System call Emulation
 #[naked]
 unsafe extern "C" fn cpu_int40_handler() {
-    asm!(
+    naked_asm!(
         "
     push rbp
     sub rsp, 24
@@ -1295,8 +1294,7 @@ unsafe extern "C" fn cpu_int40_handler() {
     lea rsp, [rbp + 8 * 4]
     mov ebp, r8d
     iretq
-    ",
-        options(noreturn)
+    "
     );
 }
 

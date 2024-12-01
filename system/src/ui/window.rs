@@ -17,6 +17,7 @@ use core::future::Future;
 use core::num::*;
 use core::ops::Deref;
 use core::pin::Pin;
+use core::ptr::addr_of;
 use core::sync::atomic::*;
 use core::task::{Context, Poll};
 use core::time::Duration;
@@ -253,12 +254,12 @@ impl WindowManager<'_> {
     #[inline]
     #[track_caller]
     fn shared<'a>() -> &'a WindowManager<'static> {
-        unsafe { WM.as_ref().unwrap() }
+        unsafe { (&*addr_of!(WM)).as_ref().unwrap() }
     }
 
     #[inline]
     fn shared_opt<'a>() -> Option<&'a Box<WindowManager<'static>>> {
-        unsafe { WM.as_ref() }
+        unsafe { (&*addr_of!(WM)).as_ref() }
     }
 
     /// Window Manager's Thread
@@ -277,7 +278,7 @@ impl WindowManager<'_> {
                 while let Some(event) = shared.system_event.dequeue() {
                     match event {
                         WindowSystemEvent::Key(w, e) => {
-                            w.post(WindowMessage::Key(e)).unwrap();
+                            let _ = w.post(WindowMessage::Key(e));
                         }
                     }
                 }
@@ -585,7 +586,7 @@ impl WindowManager<'_> {
 
     #[inline]
     pub fn is_enabled() -> bool {
-        unsafe { WM.is_some() }
+        unsafe { (&*addr_of!(WM)).is_some() }
     }
 
     #[inline]

@@ -17,7 +17,7 @@ use core::fmt;
 use core::intrinsics::transmute;
 use core::num::*;
 use core::ops::*;
-use core::ptr::addr_of;
+use core::ptr::{addr_of, addr_of_mut};
 use core::sync::atomic::*;
 use core::time::Duration;
 use megstd::io::{Error, ErrorKind};
@@ -174,7 +174,7 @@ impl Scheduler {
     #[inline]
     #[track_caller]
     fn shared<'a>() -> &'a Self {
-        unsafe { SCHEDULER.as_ref().unwrap() }
+        unsafe { (&*addr_of!(SCHEDULER)).as_ref().unwrap() }
     }
 
     fn _dispatch(_index: usize) {
@@ -332,11 +332,13 @@ impl Scheduler {
     unsafe fn local_scheduler() -> Option<&'static mut Box<LocalScheduler>> {
         assert!(Hal::cpu().is_interrupt_disabled());
 
-        SCHEDULER.as_mut().and_then(|scheduler| {
-            scheduler
-                .locals
-                .get_mut(Hal::cpu().current_processor_index().0)
-        })
+        (&mut *addr_of_mut!(SCHEDULER))
+            .as_mut()
+            .and_then(|scheduler| {
+                scheduler
+                    .locals
+                    .get_mut(Hal::cpu().current_processor_index().0)
+            })
     }
 
     /// Returns whether the specified processor is stalled or not.
@@ -1100,7 +1102,7 @@ impl Timer {
     }
 
     fn timer_source<'a>() -> &'a Box<dyn TimerSource> {
-        unsafe { TIMER_SOURCE.as_ref().unwrap() }
+        unsafe { (&*addr_of!(TIMER_SOURCE)).as_ref().unwrap() }
     }
 
     // #[track_caller]

@@ -5,6 +5,7 @@ use crate::system::System;
 use crate::*;
 use core::mem::MaybeUninit;
 use core::pin::Pin;
+use core::ptr::{addr_of, addr_of_mut};
 use futures_util::Future;
 
 #[macro_export]
@@ -50,13 +51,13 @@ impl EventManager {
         assert_call_once!();
 
         unsafe {
-            EVENT_MANAGER.write(Self::new());
+            (&mut *addr_of_mut!(EVENT_MANAGER)).write(Self::new());
         }
     }
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*EVENT_MANAGER.as_ptr() }
+        unsafe { &*(&*addr_of!(EVENT_MANAGER)).as_ptr() }
     }
 
     pub fn system_log(s: &str) {

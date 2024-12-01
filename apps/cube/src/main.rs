@@ -23,6 +23,7 @@ limitations under the License.
 extern crate libm;
 use core::cell::UnsafeCell;
 use core::f64::consts::PI;
+use core::ptr::addr_of_mut;
 use libm::{ceil, cos, floor, sin};
 use megstd::drawing::vec::*;
 use megstd::window::*;
@@ -83,7 +84,7 @@ impl<'a> App<'a> {
             .max_fps(20)
             .build("cube");
         let bitmap = BitmapRefMut32::from_bytes(
-            unsafe { DATA.get_mut() },
+            unsafe { (&mut *addr_of_mut!(DATA)).get_mut() },
             Size::new(CANVAS_SIZE_U, CANVAS_SIZE_U),
         );
         Self {

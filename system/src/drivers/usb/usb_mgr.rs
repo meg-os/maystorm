@@ -6,7 +6,7 @@ use core::mem::{size_of, MaybeUninit};
 use core::num::NonZeroU8;
 use core::ops::Deref;
 use core::pin::Pin;
-use core::ptr::null_mut;
+use core::ptr::{addr_of, addr_of_mut, null_mut};
 use core::slice;
 use core::sync::atomic::*;
 use core::time::Duration;
@@ -100,7 +100,7 @@ impl UsbManager {
     pub unsafe fn init() {
         assert_call_once!();
 
-        USB_MANAGER.write(Self {
+        (&mut *addr_of_mut!(USB_MANAGER)).write(Self {
             devices: RwLock::new(BTreeMap::new()),
             specific_driver_starters: RwLock::new(Vec::new()),
             class_driver_starters: RwLock::new(Vec::new()),
@@ -123,7 +123,7 @@ impl UsbManager {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*USB_MANAGER.as_ptr() }
+        unsafe { &*(&*addr_of!(USB_MANAGER)).as_ptr() }
     }
 
     /// Initialize the USB device and tie it to the appropriate class driver.

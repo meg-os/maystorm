@@ -32,6 +32,8 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #![no_std]
 
 use core::cell::UnsafeCell;
+use core::ptr::addr_of_mut;
+use megstd::drawing::BitmapRefMut32;
 use megstd::sys::syscall::*;
 use megstd::window::*;
 
@@ -70,7 +72,7 @@ impl<'a> App<'a> {
             .max_fps(50)
             .build("noiz2bg");
         let bitmap = BitmapRefMut32::from_bytes(
-            unsafe { DATA.get_mut() },
+            unsafe { (&mut *addr_of_mut!(DATA)).get_mut() },
             Size::new(BITMAP_WIDTH, BITMAP_HEIGHT),
         );
         Self {
@@ -145,7 +147,7 @@ impl App<'_> {
                             .blend_rect(Rect::new(x, y, width, height), board.color);
                     } else {
                         os_blend_rect(
-                            &self.bitmap as *const _ as usize,
+                            &self.bitmap as *const BitmapRefMut32 as usize,
                             x,
                             y,
                             width,

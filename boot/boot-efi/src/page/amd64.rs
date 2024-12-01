@@ -6,6 +6,8 @@ use core::mem::size_of;
 use core::ptr::{self, addr_of_mut};
 use core::slice;
 use core::sync::atomic::{AtomicU64, Ordering};
+use uefi::boot::{allocate_pages, AllocateType};
+use uefi::mem::memory_map::{MemoryMap, MemoryMapOwned};
 
 const N_DIRECT_MAP_GIGA: usize = 4;
 const MAX_REAL_MEMORY: u64 = 0x0000A_0000;
@@ -37,11 +39,11 @@ impl PageManager {
     }
 
     /// First initialize before exit_boot_services
-    pub unsafe fn init_first(bs: &BootServices) -> Result<(), Status> {
+    pub unsafe fn init_first() -> Result<(), Status> {
         let max_address = 0xFFFF_0000;
         let page_size = 0x0020_0000;
         let count = page_size / UEFI_PAGE_SIZE;
-        let page_base = match bs.allocate_pages(
+        let page_base = match allocate_pages(
             AllocateType::MaxAddress(max_address),
             MemoryType::LOADER_DATA,
             count as usize,
@@ -50,13 +52,15 @@ impl PageManager {
             Err(err) => return Err(err.status()),
         };
         let shared = Self::shared();
-        shared.static_start.store(page_base, Ordering::Release);
+        shared
+            .static_start
+            .store(page_base.as_ptr() as usize as u64, Ordering::Release);
         shared.static_free.store(page_size, Ordering::Release);
         Ok(())
     }
 
     /// Second initialize after exit_boot_services
-    pub unsafe fn init_late(info: &mut BootInfo, mm: MemoryMap) {
+    pub unsafe fn init_late(info: &mut BootInfo, mm: MemoryMapOwned) {
         let shared = Self::shared();
         let mm = mm.entries();
 

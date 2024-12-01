@@ -1,7 +1,6 @@
 //! My x86 libraries
 
 #![cfg_attr(not(test), no_std)]
-#![feature(asm_const)]
 #![feature(negative_impls)]
 // #![deny(unsafe_op_in_unsafe_fn)]
 // #![feature(cfg_match)]

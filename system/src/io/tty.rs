@@ -4,6 +4,7 @@ use crate::*;
 use core::cell::UnsafeCell;
 use core::future::Future;
 use core::pin::Pin;
+use core::ptr::addr_of;
 use core::task::{Context, Poll};
 
 pub trait TtyWrite: Write {
@@ -105,7 +106,7 @@ impl NullTty {
 
     #[inline]
     pub fn null<'a>() -> &'a mut dyn Tty {
-        unsafe { &mut *NULL_TTY.get() }
+        unsafe { &mut *(&*addr_of!(NULL_TTY)).get() }
     }
 }
 

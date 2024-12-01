@@ -8,6 +8,7 @@ use core::f64::consts::TAU;
 use core::mem::transmute;
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
+use core::ptr::addr_of;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use core::time::Duration;
 
@@ -52,7 +53,7 @@ impl AudioManager {
 
     #[inline]
     fn shared<'a>() -> &'a Self {
-        unsafe { &*AUDIO_MANAGER.assume_init_ref() }
+        unsafe { &*(&*addr_of!(AUDIO_MANAGER)).assume_init_ref() }
     }
 
     #[inline]

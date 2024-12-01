@@ -1,6 +1,6 @@
 use bootprot::*;
 use core::ops::*;
-use uefi::table::boot::*;
+use uefi::boot::MemoryType;
 
 cfg_match! {
     cfg(any(target_arch = "x86_64", target_arch = "x86")) => {

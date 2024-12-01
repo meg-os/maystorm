@@ -17,4 +17,4 @@ opt-level = "z"
 
 [workspace.dependencies]
 megstd = { path = "../lib/megstd" }
-libm = { version="0.2.8", features = ["unstable"] }
+libm = { version="0.2.11", features = ["unstable"] }

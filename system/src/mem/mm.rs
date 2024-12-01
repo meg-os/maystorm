@@ -11,6 +11,7 @@ use core::cell::UnsafeCell;
 use core::ffi::c_void;
 use core::mem::{size_of, transmute, MaybeUninit};
 use core::num::*;
+use core::ptr::{addr_of, addr_of_mut};
 use core::slice;
 use core::sync::atomic::*;
 
@@ -53,7 +54,7 @@ impl MemoryManager {
     pub unsafe fn init_first(info: &BootInfo) {
         assert_call_once!();
 
-        let shared = MM.get_mut();
+        let shared = (&mut *addr_of_mut!(MM)).get_mut();
 
         let mm: &[BootMemoryMapDescriptor] =
             slice::from_raw_parts(info.mmap_base as usize as *const _, info.mmap_len as usize);
@@ -106,7 +107,7 @@ impl MemoryManager {
 
     #[inline]
     fn shared() -> &'static Self {
-        unsafe { &*MM.get() }
+        unsafe { &*(&*addr_of!(MM)).get() }
     }
 
     #[inline]

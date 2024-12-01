@@ -3,6 +3,7 @@
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use boot::get_image_file_system;
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use uefi::prelude::*;
@@ -33,8 +34,8 @@ macro_rules! println {
     };
 }
 
-pub fn get_file(handle: Handle, bs: &BootServices, path: &str) -> Result<Box<[u8]>, Status> {
-    let Ok(mut fs) = bs.get_image_file_system(handle) else {
+pub fn get_file(handle: Handle, path: &str) -> Result<Box<[u8]>, Status> {
+    let Ok(mut fs) = get_image_file_system(handle) else {
         return Err(Status::LOAD_ERROR);
     };
     let mut root = match fs.open_volume() {

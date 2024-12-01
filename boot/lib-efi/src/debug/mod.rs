@@ -1,5 +1,6 @@
 use core::fmt::Write;
 use core::mem::MaybeUninit;
+use core::ptr::addr_of_mut;
 use core::slice;
 
 include!("megh0816.rs");
@@ -27,7 +28,7 @@ impl Console {
 
     #[inline]
     pub fn shared<'a>() -> &'a mut Self {
-        unsafe { CONSOLE.assume_init_mut() }
+        unsafe { (&mut *addr_of_mut!(CONSOLE)).assume_init_mut() }
     }
 
     #[inline]
@@ -48,7 +49,7 @@ impl Console {
         shared.fill_rect(0, 0, width, height, 0x000000);
 
         unsafe {
-            CONSOLE.write(shared);
+            (&mut *addr_of_mut!(CONSOLE)).write(shared);
         }
     }
 
