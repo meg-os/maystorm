@@ -357,7 +357,7 @@ impl fmt::LowerHex for PhysicalAddress {
 
 impl Step for PhysicalAddress {
     #[inline]
-    fn steps_between(start: &Self, end: &Self) -> Option<usize> {
+    fn steps_between(start: &Self, end: &Self) -> (usize, Option<usize>) {
         u64::steps_between(&start.0, &end.0)
     }
 
