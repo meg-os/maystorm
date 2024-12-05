@@ -2,7 +2,7 @@
 
 ![GitHub](https://img.shields.io/github/license/neri/maystorm) ![GitHub top language](https://img.shields.io/github/languages/top/neri/maystorm)
 
-A hobby operating system written in Rust that supports WebAssembly.
+My first hobby operating system.
 
 ## Feature
 
@@ -13,7 +13,7 @@ A hobby operating system written in Rust that supports WebAssembly.
 
 ## Requirements
 
-* Platform: IBM PC Compatibles in the 2020s
+* Platform: IBM PC Compatibles
 * Processor: x64 processor with up to 64 cores
 * RAM: ??? GB
 * Storage: ???
